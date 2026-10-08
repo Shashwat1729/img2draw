@@ -150,8 +150,8 @@ detail patches are per-object (`target`), so deleting an object also drops its d
 
 ## License
 
-MIT for this project's code. Vendored repos keep their own licenses (see
-`THIRD_PARTY_NOTICES.md`).
+[Business Source License 1.1](LICENSE): free for personal, educational and research use; converts to
+Apache 2.0 on 2030-10-08. Vendored repos keep their own licenses (see `THIRD_PARTY_NOTICES.md`).
 
 ## Try it in the browser (GitHub Pages)
 
