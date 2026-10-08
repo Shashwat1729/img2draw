@@ -107,17 +107,18 @@ Writes project JSON, `*.stages.png` (stage-by-stage sheet), `*.structure.png`
 left, pen strokes growing with a pen-tip cursor, color shapes spreading from a seed,
 polish wiping in. No cuts between stages.
 
-Tested on Luffy / Naruto / Tanjiro (fetched locally into `testdata/`, git-ignored):
-final PSNR 100 dB (pixel-exact), structure-only PSNR ~21 dB / SSIM ~0.8-0.86 --
+Tested on 700-1100 px art of Luffy / Zoro / Zenitsu / Naruto (fetched locally into
+`testdata/`, git-ignored): final PSNR 100 dB (pixel-exact), structure-only PSNR
+22-29 dB / SSIM 0.85-0.91 --
 the structured stages carry the look, polish carries the last pixels.
 
 ## See it draw
 
-Real output (images are the actual replay, not mock-ups). Each GIF goes outline -> colors -> shading -> details, no cuts:
+Real output (these are the actual replay, not mock-ups; character art belongs to its owners and is shown only as a test input). Each GIF goes outline -> colors -> shading -> details, no cuts:
 
-| Luffy | Tanjiro |
-|---|---|
-| ![Luffy drawing](docs/luffy_drawing.gif) | ![Tanjiro drawing](docs/tanjiro_drawing.gif) |
+| Luffy | Zoro | Zenitsu | Naruto |
+|---|---|---|---|
+| ![Luffy](docs/luffy_drawing.gif) | ![Zoro](docs/zoro_drawing.gif) | ![Zenitsu](docs/zenitsu_drawing.gif) | ![Naruto](docs/naruto_drawing.gif) |
 
 ## Editable at any frame
 
