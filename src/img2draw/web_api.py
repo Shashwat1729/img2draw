@@ -70,11 +70,10 @@ def call(route: str, query: str = "{}", body: str = "null") -> str:
     elif route == "/api/pick":
         st = state_at(p, int(fr))
         x, y = int(q["x"]), int(q["y"])
-        oid = st.pick(x, y)
+        oid, m = st.select(x, y)
         if oid is None:
             out = {"id": None}
         else:
-            m = st.owner_map() == st._idn[oid]
             rgba = np.zeros((*m.shape, 4), np.uint8)
             rgba[m] = (255, 64, 160, 140)
             out = {"id": oid, "area": int(m.sum()), "mask": _b64(rgba[..., [2, 1, 0, 3]])}

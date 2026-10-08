@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 from . import schema
-from .renderer import render_project, state_at
+from .renderer import State, render_project, state_at
 from .schema import new_layer, new_project, op_image_patch
 
 # base K, tonal K, detail K, polish tolerance (max abs error left, 0 = exact)
@@ -238,7 +238,7 @@ def _subpixel_rings(mask: np.ndarray, min_hole: float, eps: float = 0.3):
     return groups
 
 
-def components(labels: np.ndarray, ref: np.ndarray, min_area: float, eps: float = 0.3):
+def components(labels: np.ndarray, ref: np.ndarray, min_area: float, eps: float = 0.3, holes: bool = True):
     """Per connected component of the label map: (area, rings, mean_color, seed).
     Boundaries are sub-pixel. Holes smaller than min_area are dropped so the
     parent covers them."""
@@ -261,10 +261,11 @@ def components(labels: np.ndarray, ref: np.ndarray, min_area: float, eps: float 
             color = ref[y0:y1, x0:x1][crop.astype(bool)].mean(0)
             dist = cv2.distanceTransform(crop, cv2.DIST_L2, 3)
             sy, sx = np.unravel_index(int(dist.argmax()), dist.shape)
-            for rings in _subpixel_rings(mk, min_area, eps):
+            for rings in _subpixel_rings(mk, min_area if holes else float('inf'), eps):
                 out.append((area, [(r + [ox, oy]).tolist() for r in rings],
                             [int(round(v)) for v in color], [int(x0 + sx), int(y0 + sy)]))
-    out.sort(key=lambda r: -r[0])
+    # painter's order: with holes off, an enclosing region must precede what it encloses
+    out.sort(key=lambda r: -(r[0] if holes else cv2.contourArea(np.asarray(r[1][0], np.float32))))
     return out
 
 
@@ -289,7 +290,8 @@ def _mean_color_in(rings, canvas: np.ndarray) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ polish
-def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_t: int | None = None) -> int:
+def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_t: int | None = None,
+           per_object: bool = True) -> int:
     """Per-object touch-up: signed residual tiles, each owned by (target) the
     object whose pixels it corrects, so deleting/erasing that object drops its
     detail too. Returns the next free t."""
@@ -303,6 +305,8 @@ def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_
         project["layers"].append(layer)
     st = state_at(project)
     owner, ids = st.owner_map(), st.ids
+    if not per_object:  # ablation: one global residual, no owner (the pre-edit-aware design)
+        owner = np.full_like(owner, -1)
     t = start_t
     tile = 16 if max(h, w) <= 600 else 32
     order = {o: i for i, o in enumerate(range(len(ids)))}
@@ -340,7 +344,107 @@ def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_
     return t
 
 
+def line_cells(lines: np.ndarray):
+    """Pen-outlined cells: connected areas not crossed by ink. -> (label map, background label)."""
+    walls = cv2.dilate(lines.astype(np.uint8), np.ones((3, 3), np.uint8))
+    n, cell = cv2.connectedComponents((walls == 0).astype(np.uint8), connectivity=4)
+    sizes = np.bincount(cell.ravel(), minlength=n); sizes[0] = 0
+    return cell, (int(sizes.argmax()) if n > 1 else -1)
+
+
+def split_strokes(ops: list[dict], cell: np.ndarray, bg_cell: int) -> list[dict]:
+    """Cut each pen stroke where the object it borders changes, so one object's outline can be
+    selected/deleted without touching its neighbour's. Pieces carry a temporary `cell` tag."""
+    h, w = cell.shape
+    out = []
+    for op in ops:
+        pts = np.asarray(op["points"], float)
+        if len(pts) < 2:
+            out.append(op); continue
+        d = np.gradient(pts, axis=0); nr = np.stack([-d[:, 1], d[:, 0]], 1)
+        nr /= np.maximum(np.linalg.norm(nr, axis=1, keepdims=True), 1e-6)
+        dom = []
+        for q, nn in zip(pts, nr):
+            vs = [int(cell[int(np.clip(y, 0, h - 1)), int(np.clip(x, 0, w - 1))])
+                  for x, y in (q + 4 * nn, q - 4 * nn)]
+            vs = [v for v in vs if v > 0 and v != bg_cell]
+            dom.append(vs[0] if len(vs) == 1 else (min(vs) if vs else None))
+        last = next((v for v in dom if v), None)
+        for i, v in enumerate(dom):
+            dom[i] = v or last; last = dom[i]
+        i = 0
+        while i < len(pts) - 1:
+            j = i + 1
+            while j < len(pts) - 1 and dom[j] == dom[i]:
+                j += 1
+            piece = dict(op, points=pts[i:j + 1].tolist(), widths=list(op["widths"][i:j + 1]))
+            if dom[i]:
+                piece["cell"] = dom[i]
+            out.append(piece)
+            i = j
+    return out
+
+
+def assign_parents(project: dict, w: int, h: int, cell: np.ndarray, bg_cell: int) -> None:
+    """Part hierarchy. An object is a pen-outlined cell: flat regions that share a cell (base tone,
+    shadow tone...) hang off its largest region; shading/detail fills hang off the region under their
+    seed; pen strokes off the object beside them. Deleting a root takes its whole subtree along.
+    `parent` ids always point at a root, so chains have length one."""
+    flat = next((l for l in project["layers"] if l["id"] == "layer_flat_colors"), None)
+    if flat is None:
+        return
+    st = State(project)
+    li = project["layers"].index(flat)
+    for op in flat["operations"]:
+        st.draw(li, op)
+    om, ids = st.owner_map(), st.ids
+    bg = flat["operations"][0]["id"]
+
+    def at(x, y):
+        return int(np.clip(x, 0, w - 1)), int(np.clip(y, 0, h - 1))
+
+    members: dict[int, list[dict]] = {}
+    plates = {op["id"] for op in flat["operations"] if op.get("plate")}
+    for op in flat["operations"][1:]:
+        if op.get("plate"):
+            continue
+        x, y = at(*op["seed"])
+        c = int(cell[y, x])
+        if c > 0 and c != bg_cell:
+            members.setdefault(c, []).append(op)
+    root_of_flat, cell_root = {}, {}
+    for c, ops in members.items():
+        big = max(ops, key=lambda o: cv2.contourArea(np.asarray(o["rings"][0], np.float32)))
+        for o in ops:
+            if o is not big:
+                o["parent"] = big["id"]
+            root_of_flat[o["id"]] = big["id"]
+        cell_root[c] = big["id"]
+
+    def root_at(x, y):
+        x, y = at(x, y)
+        o = om[y, x]
+        if o < 0 or ids[o] == bg or ids[o] in plates:
+            return None
+        return root_of_flat.get(ids[o], ids[o])
+
+    for layer in project["layers"]:
+        if layer is flat:
+            continue
+        for op in layer["operations"]:
+            if op["type"] == "FILL" and op.get("seed"):
+                r = root_at(*op["seed"])
+            elif op["type"] == "BRUSH_STROKE":
+                r = cell_root.get(op.pop("cell", None))
+            else:
+                continue
+            if r and r != op.get("id"):
+                op["parent"] = r
+
+
 # ------------------------------------------------------------------ plan
+PLATE, PLATE_K = True, 5  # research switch: inpainted background plate under objects
+HOLES = False  # flat regions are painted whole, so deleting an object reveals what lies beneath
 PROGRESS = {"stage": 0, "of": 4, "label": ""}  # read by the UI while plan() runs
 
 
@@ -353,7 +457,7 @@ def _progress(i: int, label: str) -> None:
         HOOK(i, label)
 
 
-def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dict:
+def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None, per_object: bool = True) -> dict:
     kb, kt, kd, mtol = MODES.get(mode, MODES["balanced"])
     tol = mtol if tol is None else tol
     h, w = img.shape[:2]
@@ -384,7 +488,8 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     _progress(0, "Tracing the pen outline")
     lines = line_mask(img)
     s0 = t[0]
-    for op in outline_ops(img, lines):
+    cell, bg_cell = line_cells(lines)
+    for op in split_strokes(outline_ops(img, lines), cell, bg_cell):
         add(layers["Outline"], op)
     stage("Outline", s0)
 
@@ -394,7 +499,14 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     s0 = t[0]
     add(layers["Flat colors"], fill_op([[[0, 0], [w, 0], [w, h], [0, h]]],
                                        [int(v) for v in clean.reshape(-1, 3).mean(0)]))
-    for _, rings, col, seed in components(quantize(clean, kb), clean, max(12, area * 0.0006)):
+    if PLATE and bg_cell > 0 and (cell != bg_cell).sum() > 0.002 * area:
+        # background plate: what lies beneath the outlined objects, so deleting one reveals a
+        # plausible backdrop (inpainted from its surroundings) instead of a flat mean colour
+        occl = cv2.dilate((cell != bg_cell).astype(np.uint8), np.ones((3, 3), np.uint8))
+        plate = cv2.inpaint(clean, occl, 5, cv2.INPAINT_TELEA)
+        for _, rings, col, seed in components(quantize(plate, PLATE_K), plate, area * 0.002, holes=False):
+            add(layers["Flat colors"], dict(fill_op(rings, col, seed), plate=True))
+    for _, rings, col, seed in components(quantize(clean, kb), clean, max(12, area * 0.0006), holes=HOLES):
         add(layers["Flat colors"], fill_op(rings, col, seed))
     stage("Flat colors", s0)
 
@@ -428,6 +540,8 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
         add(layers["Details"], fill_op(rings, col, seed))
     stage("Details", s0)
 
+    assign_parents(project, w, h, cell, bg_cell)
+
     # drop empty layers (keeps z-order)
     project["layers"] = [l for l in project["layers"] if l["operations"]]
 
@@ -435,7 +549,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     _progress(3, "Final touch-up for an exact match")
     project["metadata"]["structure_ops"] = t[0]
     s0 = t[0]
-    t[0] = polish(project, img, tol, start_t=t[0])
+    t[0] = polish(project, img, tol, start_t=t[0], per_object=per_object)
     stage("Polish", s0)
 
     project["metadata"]["stages"] = stages

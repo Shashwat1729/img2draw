@@ -199,11 +199,9 @@ def pick(x: int, y: int, frame: int | None = None):
     """Object under (x, y) at `frame`: id, bbox and a tint mask (PNG, alpha)."""
     from .renderer import state_at
     st = state_at(STATE["project"], frame)
-    om = st.owner_map()
-    oid = st.pick(x, y)
+    oid, m = st.select(x, y)
     if oid is None:
         return {"id": None}
-    m = om == st._idn[oid]
     ys, xs = np.nonzero(m)
     rgba = np.zeros((*m.shape, 4), np.uint8)
     rgba[m] = (255, 64, 160, 140)

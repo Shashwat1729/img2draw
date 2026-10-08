@@ -139,3 +139,36 @@ def test_recolor_keeps_geometry():
     _insert(p, {"type": "RECOLOR", "target": oid, "color": [0, 200, 0]}, 1)
     out = renderer.render_project(p)
     assert out[48, 48, 1] > out[48, 48, 0]  # greenish now
+
+
+def test_delete_takes_part_subtree():
+    img = _toon()
+    p = artist.plan(img)
+    kids = [op for l in p["layers"] for op in l["operations"] if "parent" in op]
+    assert kids, "shading/detail/outline ops should hang off flat regions"
+    parent = max({k["parent"] for k in kids}, key=lambda i: sum(k["parent"] == i for k in kids))
+    q = _insert(p, {"type": "DELETE", "targets": [parent]}, 1) and p
+    st = renderer.state_at(q)
+    assert {k["id"] for k in kids if k["parent"] == parent} <= st.dead
+    assert parent in st.dead
+
+
+def test_select_groups_parts_and_recolor_shifts_them():
+    img = _toon()
+    p = artist.plan(img)
+    st = renderer.state_at(p)
+    kids = {}
+    for l in p["layers"]:
+        for op in l["operations"]:
+            if "parent" in op:
+                kids.setdefault(op["parent"], []).append(op["id"])
+    root = max(kids, key=lambda r: len(kids[r]))
+    om = st.owner_map()
+    ys, xs = np.nonzero(np.isin(om, [st._idn[i] for i in [root] + kids[root] if i in st._idn]))
+    r, mask = st.select(int(xs[len(xs) // 2]), int(ys[len(ys) // 2]))
+    assert r == root and mask.sum() >= (om == st._idn[root]).sum()
+    # recolor at frame 1 -> every later frame has the object in the new hue, parts included
+    n = _insert(p, {"type": "RECOLOR", "target": root, "color": [0, 200, 0]}, 1)
+    out = renderer.render_project(p)
+    base = renderer.render_project(artist.plan(img))
+    assert (base[mask][:, 0].astype(int) - out[mask][:, 0]).mean() > 30  # red drained from the whole object

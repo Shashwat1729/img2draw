@@ -382,14 +382,45 @@ class State:
     deleted objects (and their detail patches) never draw, recolored objects keep
     their detail, and user paint/erase freezes its footprint against later ops."""
 
+    PROTECT = True  # research ablation switch: False = later ops may repaint user edits
+
     def __init__(self, project: dict, dead=frozenset(), recolor=None):
         self.project = project
         self.w, self.h = project["canvas"]["width"], project["canvas"]["height"]
         self.dead, self.recolor = set(dead), dict(recolor or {})
+        self.parent = {op["id"]: op["parent"] for l in project["layers"] for op in l["operations"]
+                       if "parent" in op and "id" in op}
+        if self.dead:  # deleting an object deletes its whole part subtree (shading, highlights, detail)
+            self.dead |= {i for i in self.parent if self.root(i) in self.dead}
+        if self.recolor:  # recoloring an object shifts its parts by the same colour delta
+            col = {op["id"]: op["color"] for l in project["layers"] for op in l["operations"]
+                   if "id" in op and "color" in op and op["type"] == "FILL"}
+            for tgt, new in list(self.recolor.items()):
+                if tgt not in col:
+                    continue
+                delta = np.asarray(new, int) - np.asarray(col[tgt], int)
+                for i in self.parent:
+                    if self.root(i) == tgt and i in col and i not in self.recolor:
+                        self.recolor[i] = np.clip(np.asarray(col[i], int) + delta, 0, 255).tolist()
         self.bufs: dict[int, _LayerBuf] = {}
         self.protect = np.zeros((self.h, self.w), np.float32)
         self.ids: list[str] = []
         self._idn: dict[str, int] = {}
+
+    def root(self, i: str) -> str:
+        while i in self.parent:
+            i = self.parent[i]
+        return i
+
+    def select(self, x: int, y: int):
+        """Click selection: the whole object (root + its parts) under (x, y) -> (root id, mask)."""
+        i = self.pick(x, y)
+        if i is None:
+            return None, None
+        r = self.root(i)
+        om = self.owner_map()
+        ks = [k for k, o in enumerate(self.ids) if self.root(o) == r]
+        return r, np.isin(om, ks)
 
     def _buf(self, li: int) -> _LayerBuf:
         if li not in self.bufs:
@@ -425,7 +456,7 @@ class State:
             self.protect[sl] = np.maximum(self.protect[sl], m)
             return None
         is_edit = bool(op.get("edit"))
-        clip = None if is_edit else self.protect
+        clip = None if (is_edit or not self.PROTECT) else self.protect
         undo, foot = self._buf(li).draw(op, progress, clip, self._num(oid) if oid else -1)
         if foot is not None and is_edit and op.get("protect", True) and progress >= 1:
             x0, y0, a = foot
