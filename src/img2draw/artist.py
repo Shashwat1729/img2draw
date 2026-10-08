@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 from . import schema
-from .renderer import render_project
+from .renderer import render_project, state_at
 from .schema import new_layer, new_project, op_image_patch
 
 # base K, tonal K, detail K, polish tolerance (max abs error left, 0 = exact)
@@ -290,8 +290,9 @@ def _mean_color_in(rings, canvas: np.ndarray) -> np.ndarray:
 
 # ------------------------------------------------------------------ polish
 def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_t: int | None = None) -> int:
-    """Signed touch-up tiles (serpentine order, like retouching top to bottom)
-    until max |error| <= tol. Returns the next free t."""
+    """Per-object touch-up: signed residual tiles, each owned by (target) the
+    object whose pixels it corrects, so deleting/erasing that object drops its
+    detail too. Returns the next free t."""
     h, w = img.shape[:2]
     if start_t is None:
         start_t = 1 + max((op.get("t", 0) for l in project["layers"] for op in l["operations"]), default=-1)
@@ -300,24 +301,40 @@ def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_
         layer = new_layer("layer_polish", "Polish", "raster")
         layer["blend_mode"] = "add_signed"
         project["layers"].append(layer)
+    st = state_at(project)
+    owner, ids = st.owner_map(), st.ids
     t = start_t
     tile = 16 if max(h, w) <= 600 else 32
+    order = {o: i for i, o in enumerate(range(len(ids)))}
     for _ in range(passes):
         err = img.astype(np.int16) - render_project(project).astype(np.int16)
-        mag = np.abs(err).max(-1)
-        if mag.max() <= tol:
+        bad = np.abs(err).max(-1) > tol
+        if not bad.any():
             break
-        for row, y in enumerate(range(0, h, tile)):
-            xs = list(range(0, w, tile))
-            for x in (xs if row % 2 == 0 else xs[::-1]):
-                if mag[y:y + tile, x:x + tile].max() <= tol:
-                    continue
-                e = err[y:y + tile, x:x + tile]
-                e = np.where(np.abs(e).max(-1, keepdims=True) > tol, e, 0)
-                op = op_image_patch(x, y, np.clip(e + 128, 0, 255).astype(np.uint8))
-                op["t"] = t
-                t += 1
-                layer["operations"].append(op)
+        for o in sorted(order):  # objects in drawing order
+            om = (owner == o) & bad
+            if not om.any():
+                continue
+            ys, xs = np.nonzero(om)
+            for y in range(ys.min() // tile * tile, ys.max() + 1, tile):
+                for x in range(xs.min() // tile * tile, xs.max() + 1, tile):
+                    m = om[y:y + tile, x:x + tile]
+                    if not m.any():
+                        continue
+                    e = np.where(m[..., None], err[y:y + tile, x:x + tile], 0)
+                    op = op_image_patch(x, y, np.clip(e + 128, 0, 255).astype(np.uint8))
+                    op.update(t=t, target=ids[o], id=f"d{t}")
+                    t += 1
+                    layer["operations"].append(op)
+        # pixels owned by nothing (e.g. bare canvas) get an untargeted patch
+        om = (owner < 0) & bad
+        if om.any():
+            ys, xs = np.nonzero(om)
+            e = np.where(om[..., None], err, 0)[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+            op = op_image_patch(int(xs.min()), int(ys.min()), np.clip(e + 128, 0, 255).astype(np.uint8))
+            op.update(t=t, id=f"d{t}")
+            t += 1
+            layer["operations"].append(op)
     if not layer["operations"]:
         project["layers"].remove(layer)
     return t
@@ -343,6 +360,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
 
     def add(layer, op):
         op["t"] = t[0]
+        op["id"] = f"o{t[0]}"
         t[0] += 1
         layer["operations"].append(op)
 

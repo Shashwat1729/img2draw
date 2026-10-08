@@ -83,3 +83,59 @@ def test_erase():
     l["operations"].append({"type": "ERASE", "points": [[0, 0], [31, 0], [31, 31], [0, 31]]})
     p["layers"].append(l)
     assert renderer.render_project(p).mean() > 250
+
+
+# ---------------------------------------------------------------- edit persistence
+def _insert(p, op, after):
+    """Slot an edit op right after timeline step `after` (fractional t)."""
+    tl = renderer.timeline(p)
+    op = dict(op, t=tl[after - 1][1]["t"] + 0.5)
+    p["layers"].append({"id": "layer_edits", "name": "Edits", "type": "raster", "visible": True,
+                        "blend_mode": "normal", "opacity": 1.0, "operations": [op]}) \
+        if not any(l["id"] == "layer_edits" for l in p["layers"]) else \
+        next(l for l in p["layers"] if l["id"] == "layer_edits")["operations"].append(op)
+    return len(tl)
+
+
+def _stroke(typ, x0, y0, x1, y1, w=14, **kw):
+    return {"type": typ, "points": [[x0, y0], [x1, y1]], "widths": [w, w], "color": [255, 0, 0],
+            "opacity": 1.0, **kw}
+
+
+def test_erase_persists_into_later_frames():
+    img = _toon()
+    p = artist.plan(img)
+    so = p["metadata"]["structure_ops"]
+    _insert(p, _stroke("ERASER", 30, 48, 66, 48, 12), so // 2)
+    for n in (so // 2 + 1, so, None):
+        out = renderer.state_at(p, n).compose()
+        assert (out[44:52, 36:60] == 255).all(), n  # later ops + polish never repaint it
+    assert not np.array_equal(renderer.render_project(p), img)
+
+
+def test_user_brush_persists_over_later_ops():
+    p = artist.plan(_toon())
+    _insert(p, _stroke("BRUSH_STROKE", 30, 20, 66, 20, 8, edit=True), 3)
+    out = renderer.render_project(p)
+    assert (out[20, 40:60] == [255, 0, 0]).all()
+
+
+def test_delete_object_removes_its_detail_too():
+    img = _toon()
+    p = artist.plan(img)
+    st = renderer.state_at(p, p["metadata"]["structure_ops"])
+    oid = st.pick(48, 48)
+    assert oid
+    _insert(p, {"type": "DELETE", "targets": [oid]}, 1)
+    out = renderer.render_project(p)
+    assert not np.array_equal(out[44:52, 44:52], img[44:52, 44:52])
+    assert not any(op.get("target") == oid and oid not in renderer.state_at(p).dead for l in p["layers"] for op in l["operations"])
+
+
+def test_recolor_keeps_geometry():
+    img = _toon()
+    p = artist.plan(img)
+    oid = renderer.state_at(p, p["metadata"]["structure_ops"]).pick(48, 48)
+    _insert(p, {"type": "RECOLOR", "target": oid, "color": [0, 200, 0]}, 1)
+    out = renderer.render_project(p)
+    assert out[48, 48, 1] > out[48, 48, 0]  # greenish now

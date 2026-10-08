@@ -125,15 +125,55 @@ def reorder(ids: list[str]):
     return {"ok": True}
 
 
-@app.post("/api/edit/brush")
-def add_brush(points: list[list[float]], color: list[int], width: float = 8, opacity: float = 1.0):
-    _snapshot()
+def _edit_layer():
     layer = next((l for l in STATE["project"]["layers"] if l["name"] == "Edits"), None)
     if layer is None:
         layer = schema.new_layer("layer_edits", "Edits", type_="raster")
         STATE["project"]["layers"].append(layer)
-    layer["operations"].append({"type": "BRUSH_STROKE", "points": points, "color": color,
-                                "width": width, "opacity": opacity})
+    return layer
+
+
+def _add_edit(op: dict, frame: int | None):
+    """Slot an edit into the timeline right after `frame` steps (end if None).
+    Later frames then respect it: see renderer.State."""
+    from .renderer import timeline
+    tl = timeline(STATE["project"])
+    n = len(tl) if frame is None else min(max(frame, 0), len(tl))
+    prev = tl[n - 1][1].get("t", n - 1) if n else -1
+    op["t"] = prev + 0.5 if n < len(tl) else prev + 1
+    _snapshot()
+    _edit_layer()["operations"].append(op)
+
+
+@app.post("/api/edit/brush")
+def add_brush(points: list[list[float]], color: list[int], width: float = 8, opacity: float = 1.0,
+              frame: int | None = None):
+    _add_edit({"type": "BRUSH_STROKE", "points": points, "color": color, "width": width,
+               "opacity": opacity, "edit": True}, frame)
+    return {"ok": True}
+
+
+@app.post("/api/edit/erase")
+def add_erase(points: list[list[float]], width: float = 12, frame: int | None = None):
+    _add_edit({"type": "ERASER", "points": points, "width": width}, frame)
+    return {"ok": True}
+
+
+@app.get("/api/pick")
+def pick(x: int, y: int, frame: int | None = None):
+    from .renderer import state_at
+    return {"id": state_at(STATE["project"], frame).pick(x, y)}
+
+
+@app.post("/api/edit/delete")
+def delete_object(target: str, frame: int | None = None):
+    _add_edit({"type": "DELETE", "targets": [target]}, frame)
+    return {"ok": True}
+
+
+@app.post("/api/edit/recolor")
+def recolor_object(target: str, color: list[int], frame: int | None = None):
+    _add_edit({"type": "RECOLOR", "target": target, "color": color}, frame)
     return {"ok": True}
 
 

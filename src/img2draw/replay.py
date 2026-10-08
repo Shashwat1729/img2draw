@@ -67,38 +67,32 @@ def _pen(frame: np.ndarray, tip, scale: float = 1.0) -> None:
 def frames(project: dict, fps: int = 30, seconds: float = 30.0, hold: float = 1.5) -> Iterator[np.ndarray]:
     cw, ch = project["canvas"]["width"], project["canvas"]["height"]
     tl, starts, ends = schedule(project, seconds)
-    bufs = {li: R._LayerBuf(project["layers"][li], cw, ch) for li in sorted({li for li, _ in tl})}
+    st = R.State(project)
     n, done = len(tl), 0
-
-    def compose() -> np.ndarray:
-        canvas = np.ones((ch, cw, 3), np.float32)
-        for li in sorted(bufs):
-            canvas = R._composite(canvas, bufs[li])
-        return np.clip(np.rint(canvas * 255.0), 0, 255).astype(np.uint8)
 
     total = int(round(seconds * fps))
     for f in range(total + 1):
         now = f / fps
         while done < n and ends[done] <= now:
-            bufs[tl[done][0]].draw(tl[done][1])
+            st.draw(*tl[done])
             done += 1
-        token, tip, li = None, None, None
+        token, tip = None, None
         if done < n and starts[done] < now:
             li, op = tl[done]
             p = float((now - starts[done]) / max(ends[done] - starts[done], 1e-9))
-            token = bufs[li].draw(op, p)
+            token = st.draw(li, op, p)
             if op["type"] in ("BRUSH_STROKE", "PATH"):
                 tip = R.stroke_prefix(op, p)[2]
-        frame = compose()
+        frame = st.compose()
         if tip is not None:
             frame = frame.copy()
             _pen(frame, tip)
         if token is not None:
-            bufs[li].undo(token)
+            st.undo(token)
         yield frame
     for op_li, op in tl[done:]:
-        bufs[op_li].draw(op)
-    last = compose()
+        st.draw(op_li, op)
+    last = st.compose()
     for _ in range(int(round(hold * fps))):
         yield last
 

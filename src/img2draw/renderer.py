@@ -279,20 +279,19 @@ def _roi_op(op: dict, w: int, h: int, progress: float = 1.0):
 
 
 class _LayerBuf:
-    """Premultiplied-RGBA accumulator for one layer (signed delta for add_signed)."""
+    """Premultiplied-RGBA accumulator for one layer (signed delta for add_signed),
+    plus an owner map: which op last painted each pixel (>50% coverage)."""
 
     def __init__(self, layer: dict, w: int, h: int):
         self.layer, self.w, self.h = layer, w, h
         self.signed = layer.get("blend_mode") == "add_signed"
         self.buf = np.zeros((h, w, 3 if self.signed else 4), np.float32)
+        self.owner = None if self.signed else np.full((h, w), -1, np.int32)
 
-    def draw(self, op: dict, progress: float = 1.0):
-        """Draw (part of) op. Returns an undo token for partial draws."""
-        if op["type"] == "ERASE":
-            saved = self.buf.copy() if progress < 1 else None
-            m = _op_layer(op, self.w, self.h)[..., 3:4]
-            self.buf *= (1.0 - m * progress)
-            return (0, 0, saved) if saved is not None else None
+    def draw(self, op: dict, progress: float = 1.0, clip: np.ndarray | None = None,
+             owner_id: int = -1):
+        """Draw (part of) op. clip (HxW in [0,1]) protects pixels from this op.
+        Returns (undo token | None, footprint (x0, y0, alpha_before_clip) | None)."""
         r = _roi_op(op, self.w, self.h, progress)
         if r is None:  # rare ops via legacy full-canvas rasterizer
             leg = _op_layer(op, self.w, self.h)
@@ -300,21 +299,30 @@ class _LayerBuf:
         x0, y0, rgb, a = r
         bh, bw = a.shape
         if bh == 0 or bw == 0:
-            return None
+            return None, None
+        foot = (x0, y0, a)
+        if clip is not None:
+            a = a * (1.0 - clip[y0:y0 + bh, x0:x0 + bw])
         roi = self.buf[y0:y0 + bh, x0:x0 + bw]
-        undo = (y0, x0, roi.copy()) if progress < 1 else None
+        undo = None
+        if progress < 1:
+            undo = (y0, x0, roi.copy(), None if self.owner is None else self.owner[y0:y0 + bh, x0:x0 + bw].copy())
         a3 = a[..., None]
         if self.signed:
             roi += (rgb - 128.0 / 255.0) * a3
         else:
             roi[..., :3] = rgb * a3 + roi[..., :3] * (1 - a3)
             roi[..., 3:4] = a3 + roi[..., 3:4] * (1 - a3)
-        return undo
+            if owner_id >= 0:
+                self.owner[y0:y0 + bh, x0:x0 + bw][a > 0.5] = owner_id
+        return undo, foot
 
     def undo(self, token):
         if token is not None:
-            y0, x0, saved = token
+            y0, x0, saved, own = token
             self.buf[y0:y0 + saved.shape[0], x0:x0 + saved.shape[1]] = saved
+            if own is not None:
+                self.owner[y0:y0 + own.shape[0], x0:x0 + own.shape[1]] = own
 
 
 def _composite(canvas: np.ndarray, lb: _LayerBuf) -> np.ndarray:
@@ -339,9 +347,12 @@ def _composite(canvas: np.ndarray, lb: _LayerBuf) -> np.ndarray:
     return pm * op + canvas * (1 - a * op)
 
 
+GLOBAL_OPS = ("DELETE", "RECOLOR")  # edits that rewrite history from their frame on
+
+
 def timeline(project: dict) -> list[tuple[int, dict]]:
-    """(layer_index, op) in drawing order. Ops may carry an integer `t`;
-    untagged ops keep their layer order. Invisible layers are skipped.
+    """(layer_index, op) in drawing order. Ops carry `t` (float ok: edits are
+    slotted between steps); untagged ops keep layer order. Hidden layers skipped.
     Layer order is z-order (bottom first); `t` is the artist's time order."""
     items = []
     seq = 0
@@ -355,25 +366,130 @@ def timeline(project: dict) -> list[tuple[int, dict]]:
     return [(li, op) for _, _, li, op in items]
 
 
-def render_frames(project: dict, steps: list[int]):
-    """Yield (step, uint8 RGB) for each requested step count, drawing
-    incrementally in timeline order (single pass over all ops)."""
-    cw, ch = project["canvas"]["width"], project["canvas"]["height"]
+def _globals(tl, n):
+    """(dead ids, recolor map) from DELETE/RECOLOR items among the first n steps."""
+    dead, recolor = set(), {}
+    for _, op in tl[:n]:
+        if op["type"] == "DELETE":
+            dead.update(op["targets"])
+        elif op["type"] == "RECOLOR":
+            recolor[op["target"]] = op["color"]
+    return dead, recolor
+
+
+class State:
+    """Replay state. Everything later steps do respects earlier edits:
+    deleted objects (and their detail patches) never draw, recolored objects keep
+    their detail, and user paint/erase freezes its footprint against later ops."""
+
+    def __init__(self, project: dict, dead=frozenset(), recolor=None):
+        self.project = project
+        self.w, self.h = project["canvas"]["width"], project["canvas"]["height"]
+        self.dead, self.recolor = set(dead), dict(recolor or {})
+        self.bufs: dict[int, _LayerBuf] = {}
+        self.protect = np.zeros((self.h, self.w), np.float32)
+        self.ids: list[str] = []
+        self._idn: dict[str, int] = {}
+
+    def _buf(self, li: int) -> _LayerBuf:
+        if li not in self.bufs:
+            self.bufs[li] = _LayerBuf(self.project["layers"][li], self.w, self.h)
+        return self.bufs[li]
+
+    def _num(self, oid: str) -> int:
+        if oid not in self._idn:
+            self._idn[oid] = len(self.ids)
+            self.ids.append(oid)
+        return self._idn[oid]
+
+    def draw(self, li: int, op: dict, progress: float = 1.0):
+        """-> undo token (list) for partial draws, else None."""
+        t = op["type"]
+        if t in GLOBAL_OPS:
+            return None
+        oid = op.get("id")
+        if (oid is not None and oid in self.dead) or op.get("target") in self.dead:
+            return None
+        if oid in self.recolor:
+            op = dict(op, color=self.recolor[oid])
+        if t == "ERASER":  # user eraser: wipes every layer, then freezes the area
+            r = _stroke_mask(op, self.w, self.h)
+            if r is None:
+                return None
+            x0, y0, m = r
+            sl = (slice(y0, y0 + m.shape[0]), slice(x0, x0 + m.shape[1]))
+            for lb in self.bufs.values():
+                lb.buf[sl] *= (1.0 - m)[..., None]
+                if lb.owner is not None:
+                    lb.owner[sl][m > 0.5] = -1
+            self.protect[sl] = np.maximum(self.protect[sl], m)
+            return None
+        is_edit = bool(op.get("edit"))
+        clip = None if is_edit else self.protect
+        undo, foot = self._buf(li).draw(op, progress, clip, self._num(oid) if oid else -1)
+        if foot is not None and is_edit and op.get("protect", True) and progress >= 1:
+            x0, y0, a = foot
+            sl = (slice(y0, y0 + a.shape[0]), slice(x0, x0 + a.shape[1]))
+            self.protect[sl] = np.maximum(self.protect[sl], np.clip(a * 4, 0, 1))
+        return None if undo is None else [(li, undo)]
+
+    def undo(self, token):
+        for li, tk in token or []:
+            self.bufs[li].undo(tk)
+
+    def compose(self) -> np.ndarray:
+        canvas = np.ones((self.h, self.w, 3), np.float32)
+        for li in sorted(self.bufs):
+            canvas = _composite(canvas, self.bufs[li])
+        return np.clip(np.rint(canvas * 255.0), 0, 255).astype(np.uint8)
+
+    def owner_map(self) -> np.ndarray:
+        """Topmost object id (index into self.ids) per pixel, -1 if none."""
+        out = np.full((self.h, self.w), -1, np.int32)
+        for li in sorted(self.bufs):
+            lb = self.bufs[li]
+            if lb.owner is None:
+                continue
+            vis = (lb.buf[..., 3] > 0.5) & (lb.owner >= 0)
+            out[vis] = lb.owner[vis]
+        return out
+
+    def pick(self, x: int, y: int) -> str | None:
+        if not (0 <= x < self.w and 0 <= y < self.h):
+            return None
+        o = int(self.owner_map()[y, x])
+        return self.ids[o] if o >= 0 else None
+
+
+def state_at(project: dict, n: int | None = None) -> State:
+    """State after the first n timeline steps (all if None), from scratch."""
     tl = timeline(project)
-    bufs = {li: _LayerBuf(project["layers"][li], cw, ch) for li in sorted({li for li, _ in tl})}
-    done = 0
+    n = len(tl) if n is None else min(max(int(n), 0), len(tl))
+    dead, rec = _globals(tl, n)
+    st = State(project, dead, rec)
+    for li, op in tl[:n]:
+        st.draw(li, op)
+    return st
+
+
+def render_frames(project: dict, steps: list[int]):
+    """Yield (step, uint8 RGB) per requested step count. Incremental unless a
+    DELETE/RECOLOR edit appears, which rewrites history and forces a replay."""
+    tl = timeline(project)
+    st, done = State(project), 0
+    cur = (set(), {})
     for s in sorted({min(max(int(s), 0), len(tl)) for s in steps}):
+        g = _globals(tl, s)
+        if g != cur:  # history rewritten: replay from scratch with the new globals
+            st, done, cur = State(project, *g), 0, g
         for li, op in tl[done:s]:
-            bufs[li].draw(op)
+            st.draw(li, op)
         done = s
-        canvas = np.ones((ch, cw, 3), np.float32)
-        for li in sorted(bufs):
-            canvas = _composite(canvas, bufs[li])
-        yield s, np.clip(np.rint(canvas * 255.0), 0, 255).astype(np.uint8)
+        yield s, st.compose()
 
 
 def render_project(project: dict, max_ops: int | None = None) -> np.ndarray:
-    """Render the project. max_ops limits ops drawn, in timeline order."""
+    """Render the project. max_ops limits steps drawn, in timeline order."""
     n = len(timeline(project)) if max_ops is None else max_ops
     return next(render_frames(project, [n]))[1]
 
