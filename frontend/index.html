@@ -136,8 +136,13 @@ const $=id=>document.getElementById(id);
 const COLORS={"Outline":"#8ea0c8","Flat colors":"#6cc3a0","Shadows":"#7a6cc3","Highlights":"#e8c46a","Details":"#e58f6a","Polish":"#c36ca0"};
 let info=null, frame=0, tool="select", picked=null, seq=0, playing=false, drawing=null, W=0, H=0;
 
-async function api(path, opt){const r=await fetch(path,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
-const post=(p,q,body)=>api(p+"?"+new URLSearchParams(q),{method:"POST",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+const STATIC=!!window.STATIC_MODE;   // GitHub Pages: Python runs in the browser (static.js)
+async function api(path, opt){
+  if(STATIC){const u=new URL(path,"http://x");return window.pyCall(u.pathname,Object.fromEntries(u.searchParams),opt&&opt.body?JSON.parse(opt.body):null)}
+  const r=await fetch(path,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
+const post=(p,q,body)=>{
+  q=Object.fromEntries(Object.entries(q).filter(([,v])=>v!==undefined));
+  return api(p+"?"+new URLSearchParams(q),{method:"POST",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined})};
 const busy=(on,t)=>{$("busy").style.display=on?"flex":"none";if(t)$("busy").textContent=t};
 const say=t=>$("msg").textContent=t;
 
@@ -155,9 +160,10 @@ async function upload(file){
   $("status").textContent="Analyzing the picture and planning the drawing… (this can take up to a minute)";
   const fd=new FormData();fd.append("file",file);
   try{
-    const r=await fetch("/api/reconstruct?mode=balanced",{method:"POST",body:fd});
-    if(!r.ok)throw new Error(await r.text());
-    const d=await r.json();
+    let d;
+    if(STATIC)d=await window.pyLoad(file);
+    else{const r=await fetch("/api/reconstruct?mode=balanced",{method:"POST",body:fd});
+      if(!r.ok)throw new Error(await r.text());d=await r.json()}
     $("orig").src="data:image/png;base64,"+d.original;
     $("psnr").textContent=d.metrics&&d.metrics.psnr>=99?"identical":"–";
     await loadInfo();
@@ -275,6 +281,7 @@ $("recolor").onclick=async()=>{
 for(const k of ["undo","redo"])$(k).onclick=async()=>{await post("/api/"+k,{});await loadInfo();await setFrame(Math.min(frame,info.frames))};
 const hold=on=>{if(on)$("img").dataset.keep=$("img").src,$("img").src=$("orig").src;else if($("img").dataset.keep)$("img").src=$("img").dataset.keep};
 $("cmp").onpointerdown=()=>hold(true);window.addEventListener("pointerup",()=>hold(false));
+if(STATIC){$("vid").style.display="none";$("vid").nextElementSibling.style.display="none"}
 $("vid").onclick=async()=>{
   busy(true,"Rendering the full drawing video… (about a minute)");
   try{

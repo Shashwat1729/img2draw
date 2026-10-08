@@ -149,3 +149,12 @@ detail patches are per-object (`target`), so deleting an object also drops its d
 
 MIT for this project's code. Vendored repos keep their own licenses (see
 `THIRD_PARTY_NOTICES.md`).
+
+## Try it in the browser (GitHub Pages)
+
+The same editor runs fully in the browser: Python (numpy, OpenCV, scikit-learn) is
+loaded with Pyodide, so there is no server. Images are downscaled to 480 px and
+planning takes ~15-60 s. The "Watch as video" export needs the local server.
+Build locally with `python tools/build_site.py` (output in `site/`); the
+`pages.yml` workflow publishes it on push to `master` (enable Pages -> Source:
+GitHub Actions).
