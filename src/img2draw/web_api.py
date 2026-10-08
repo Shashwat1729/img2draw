@@ -28,6 +28,11 @@ def load(data, max_side: int = 480) -> dict:
         s = max_side / max(h, w)
         img = cv2.resize(img, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA)
     img = np.ascontiguousarray(img)
+    try:
+        import js  # Pyodide worker: stream progress to the page
+        artist.HOOK = lambda i, label: js.pyProgress(i, label)
+    except ImportError:
+        pass
     S.update(project=artist.plan(img, "balanced"), history=[], future=[])
     return {"original": _b64(img)}
 
@@ -51,6 +56,8 @@ def call(route: str, query: str = "{}", body: str = "null") -> str:
     q, b = json.loads(query), json.loads(body)
     p = S["project"]
     fr = q.get("frame")
+    if route == "/api/project":
+        return json.dumps(p)
     if route == "/api/info":
         tl = timeline(p)
         ts = [op.get("t", i) for i, (_, op) in enumerate(tl)]

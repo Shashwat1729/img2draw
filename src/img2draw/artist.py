@@ -341,6 +341,18 @@ def polish(project: dict, img: np.ndarray, tol: int = 0, passes: int = 4, start_
 
 
 # ------------------------------------------------------------------ plan
+PROGRESS = {"stage": 0, "of": 4, "label": ""}  # read by the UI while plan() runs
+
+
+HOOK = None  # optional callable(stage, label), e.g. the in-browser worker
+
+
+def _progress(i: int, label: str) -> None:
+    PROGRESS.update(stage=i, label=label)
+    if HOOK:
+        HOOK(i, label)
+
+
 def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dict:
     kb, kt, kd, mtol = MODES.get(mode, MODES["balanced"])
     tol = mtol if tol is None else tol
@@ -369,6 +381,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
             stages.append({"name": name, "start": start, "end": t[0]})
 
     # 1 outline ---------------------------------------------------------
+    _progress(0, "Tracing the pen outline")
     lines = line_mask(img)
     s0 = t[0]
     for op in outline_ops(img, lines):
@@ -376,6 +389,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     stage("Outline", s0)
 
     # 2 flat colors -----------------------------------------------------
+    _progress(1, "Finding color regions")
     clean = smooth_underlying(img, lines)
     s0 = t[0]
     add(layers["Flat colors"], fill_op([[[0, 0], [w, 0], [w, h], [0, h]]],
@@ -385,6 +399,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     stage("Flat colors", s0)
 
     # 3-5 error-guided tone/detail passes --------------------------------
+    _progress(2, "Adding shading and detail")
     def tone_pass(k, min_frac, thr, names):
         current = render_project(project)
         cur_lab_img = None
@@ -417,6 +432,7 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
     project["layers"] = [l for l in project["layers"] if l["operations"]]
 
     # 6 polish ----------------------------------------------------------
+    _progress(3, "Final touch-up for an exact match")
     project["metadata"]["structure_ops"] = t[0]
     s0 = t[0]
     t[0] = polish(project, img, tol, start_t=t[0])
@@ -424,5 +440,6 @@ def plan(img: np.ndarray, mode: str = "balanced", tol: int | None = None) -> dic
 
     project["metadata"]["stages"] = stages
     project["metadata"]["polish_tol"] = tol
+    _progress(4, "Done")
     project["metadata"]["progression"] = [s["name"] for s in stages]
     return project

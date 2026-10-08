@@ -1,5 +1,7 @@
 # img2draw — Inverse Drawing / Editable Drawing Reconstruction
 
+**[Open the live app](https://shashwat1729.github.io/img2draw/)** — upload an image, watch it get drawn step by step, then erase, paint, recolor or delete objects at any step. Runs entirely in your browser.
+
 Given a raster image, img2draw infers an **editable, replayable drawing
 program** (layers, regions, gradients, strokes, correction detail layers)
 whose rendering reproduces the source image with very high fidelity.
@@ -152,6 +154,8 @@ MIT for this project's code. Vendored repos keep their own licenses (see
 `THIRD_PARTY_NOTICES.md`).
 
 ## Try it in the browser (GitHub Pages)
+
+**Live app: https://shashwat1729.github.io/img2draw/**
 
 The same editor runs fully in the browser: Python (numpy, OpenCV, scikit-learn) is
 loaded with Pyodide, so there is no server. Images are downscaled to 480 px and

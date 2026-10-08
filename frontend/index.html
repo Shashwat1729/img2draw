@@ -3,241 +3,373 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>img2draw</title>
+<title>img2draw — watch any picture get drawn, then edit it</title>
+<meta name="description" content="Turn an image into a step-by-step drawing (outline, colors, shading, details) that you can erase, repaint and edit at any step.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=DM+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#16171b;--panel:#202228;--panel2:#2a2d35;--line:#363a44;--fg:#eceef2;--mut:#9aa1ae;--acc:#6c8cff;--ok:#43c487;--bad:#ef5b6b}
+:root{--paper:#F6F3EC;--card:#FBF9F4;--well:#EFEBE1;--line:#DDD7C8;--line2:#C9C2B0;--ink:#1B1B22;--mut:#6B6B76;--acc:#E4572E;--acc-bg:#FFF1EC;--blue:#2E4A7D;--blue-bg:#EEF2FA;--ok:#2E7D4F;--bad:#B3261E}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,sans-serif;height:100vh;display:flex;flex-direction:column}
-button{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
-button:hover:not(:disabled){border-color:var(--acc)}
-button:disabled{opacity:.4;cursor:default}
-button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-button.danger{border-color:var(--bad);color:var(--bad)}
-header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
-header b{font-size:16px}
-header .sp{flex:1}
-#welcome{flex:1;display:flex;align-items:center;justify-content:center;padding:24px}
-#drop{max-width:560px;width:100%;border:2px dashed var(--line);border-radius:16px;padding:48px 24px;text-align:center;background:var(--panel)}
-#drop.over{border-color:var(--acc);background:#1d2236}
-#drop h1{margin:0 0 8px;font-size:22px}
-#drop p{color:var(--mut);margin:6px 0}
-#drop ol{text-align:left;color:var(--mut);display:inline-block;margin:14px 0}
-#studio{flex:1;display:none;min-height:0}
-#studio.on{display:flex}
-#tools{width:230px;background:var(--panel);border-right:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:8px;overflow:auto}
-.tool{display:flex;gap:10px;align-items:center;text-align:left;width:100%}
-.tool.on{border-color:var(--acc);background:#232a45}
-.tool small{color:var(--mut);display:block}
-.opt{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
-.opt label{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--mut)}
-.opt input[type=range]{flex:1}
-.opt input[type=color]{width:44px;height:28px;border:0;background:none;padding:0}
-h4{margin:6px 0 0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 'DM Sans',system-ui,sans-serif;display:flex;flex-direction:column}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;min-height:40px;padding:0 16px;border:1px solid var(--line2);background:#fff;border-radius:10px;font-weight:500}
+button:hover:not(:disabled){border-color:var(--ink)}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+button:disabled{cursor:not-allowed;opacity:.5}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+button.dark{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
+button.danger{border-color:var(--bad);color:var(--bad);font-weight:700}
+.mono{font-family:'IBM Plex Mono',monospace}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase}
+.hidden{display:none!important}
+
+header{display:flex;align-items:center;gap:24px;padding:0 24px;min-height:64px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+.brand{font:700 22px 'Bricolage Grotesque',sans-serif;letter-spacing:-.02em;color:var(--ink);text-decoration:none}
+nav.steps{display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-wrap:wrap}
+.step{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:14px;white-space:nowrap}
+.step i{font:500 12px 'IBM Plex Mono',monospace;font-style:normal;width:24px;height:24px;border-radius:12px;background:#E3DECF;color:var(--mut);display:inline-flex;align-items:center;justify-content:center}
+.step.done i{background:var(--blue);color:#fff}
+.step.now{color:var(--ink);font-weight:700}.step.now i{background:var(--acc);color:#fff}
+.bar{width:28px;height:1px;background:var(--line2)}
+.hbtns{display:flex;gap:8px;align-items:center}
+
+#landing{flex:1;overflow:auto}
+.hero{max-width:1100px;margin:0 auto;padding:56px 24px 24px;display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+.hero h1{font:700 52px/1.02 'Bricolage Grotesque',sans-serif;letter-spacing:-.03em;margin:0 0 16px}
+.hero h1 em{font-style:normal;color:var(--acc)}
+.hero p.lead{font-size:18px;color:var(--mut);margin:0 0 24px;max-width:46ch}
+#drop{border:2px dashed var(--line2);border-radius:20px;background:var(--card);padding:32px 24px;text-align:center;transition:.15s}
+#drop.over{border-color:var(--acc);background:var(--acc-bg)}
+#drop h2{margin:0 0 4px;font:700 22px 'Bricolage Grotesque',sans-serif}
+#drop p{margin:0 0 16px;color:var(--mut);font-size:14px}
+#drop .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+#err{margin-top:14px;padding:10px 14px;border-radius:10px;background:#FDECEA;color:var(--bad);font-size:14px;text-align:left}
+.gifwrap{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px;text-align:center}
+.gifwrap img{max-width:100%;max-height:420px;border-radius:12px;display:block;margin:0 auto}
+.gifwrap small{display:block;color:var(--mut);margin-top:8px}
+.how{max-width:1100px;margin:0 auto;padding:24px 24px 56px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.how div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}
+.how b{display:block;margin:6px 0 4px;font:700 18px 'Bricolage Grotesque',sans-serif}
+.how span{color:var(--mut);font-size:14px}
+footer{padding:18px 24px;border-top:1px solid var(--line);color:var(--mut);font-size:13px;text-align:center}
+footer a{color:var(--blue)}
+
+#processing{flex:1;display:flex;align-items:center;justify-content:center;gap:56px;padding:40px 24px;flex-wrap:wrap}
+#pimg{max-width:min(380px,80vw);max-height:460px;border-radius:12px;border:1px solid var(--line);background:var(--well)}
+.pcol{width:min(460px,100%);display:flex;flex-direction:column;gap:18px}
+.pcol h2{margin:0;font:700 38px/1.05 'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}
+.track{height:10px;border-radius:5px;background:#E3DECF;overflow:hidden}
+.track>div{height:100%;background:var(--acc);width:5%;transition:width .5s}
+.plist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.plist li{color:#9A9AA3}.plist li.on{color:var(--ink);font-weight:700}.plist li.ok{color:var(--ok);font-weight:500}
+.plist li::before{content:"Waiting · "}.plist li.on::before{content:"Working · "}.plist li.ok::before{content:"Done · "}
+
+#studio{flex:1;display:flex;min-height:0}
+#tools,#side{background:var(--card);padding:18px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+#tools{width:232px;border-right:1px solid var(--line)}
+#side{width:272px;border-left:1px solid var(--line)}
+.tool{display:flex;align-items:center;gap:10px;padding:12px;min-height:48px;border-radius:12px;text-align:left;width:100%}
+.tool kbd{margin-left:auto;font:500 12px 'IBM Plex Mono',monospace;color:var(--mut)}
+.tool.on{border:2px solid var(--acc);background:var(--acc-bg);font-weight:700}
+.note{padding:12px;border-radius:12px;background:var(--blue-bg);border:1px solid #CBD6EE;font-size:13px;line-height:1.5;color:var(--blue)}
+.panel{padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;flex-direction:column;gap:10px}
+.panel label{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--mut);font-size:14px}
+.panel input[type=color]{width:44px;height:32px;border:1px solid var(--line2);border-radius:8px;padding:2px;background:#fff}
+.panel input[type=range]{flex:1;accent-color:var(--acc)}
 #center{flex:1;display:flex;flex-direction:column;min-width:0}
-#msg{padding:8px 16px;background:#1c2338;border-bottom:1px solid var(--line);color:#c8d3ff}
-#stage{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0;position:relative}
-#wrap{position:relative;line-height:0;box-shadow:0 8px 40px #0008;background:#fff}
+#msg{padding:10px 20px;background:var(--blue-bg);border-bottom:1px solid #CBD6EE;color:var(--blue);font-size:14px}
+#stage{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;min-height:0;background:var(--well);position:relative}
+#wrap{position:relative;line-height:0;background:#fff;box-shadow:0 12px 40px rgba(27,27,34,.18);border-radius:4px;overflow:hidden;touch-action:none}
 #wrap img,#wrap canvas{display:block;width:100%;height:100%}
 #wrap canvas{position:absolute;inset:0}
-#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#16171bcc;font-size:16px;z-index:5}
-#bar{background:var(--panel);border-top:1px solid var(--line);padding:10px 16px}
-#row{display:flex;gap:10px;align-items:center}
-#scrub{position:relative;flex:1;height:34px}
-#segs{display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:2px}
-#segs div{height:100%;cursor:pointer;opacity:.75;border-right:1px solid var(--bg)}
-#segs div:hover{opacity:1}
-#scrub input{width:100%;margin:2px 0 0}
-#labels{display:flex;font-size:11px;color:var(--mut)}
-#labels span{text-align:center;overflow:hidden;white-space:nowrap}
-#side{width:260px;background:var(--panel);border-left:1px solid var(--line);padding:12px;overflow:auto;display:flex;flex-direction:column;gap:8px}
-#orig{width:100%;border-radius:8px;border:1px solid var(--line)}
-.kv{display:flex;justify-content:space-between;color:var(--mut)}
-.kv b{color:var(--fg)}
-video{width:100%;border-radius:8px;background:#000}
+#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(246,243,236,.8);font-weight:700;z-index:4}
+#bar{padding:12px 24px;border-top:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:18px}
+#play{width:56px;height:56px;border-radius:28px;padding:0;font-weight:700}
+#scrub{flex:1;min-width:0}
+#segs{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px}
+#segs div{height:100%;cursor:pointer;opacity:.85}#segs div:hover{opacity:1}
+#frame{width:100%;margin:6px 0 0;accent-color:var(--ink)}
+#labels{display:flex;font-size:12px;color:var(--mut)}
+#labels span{overflow:hidden;white-space:nowrap}
+#fnum{font:500 14px 'IBM Plex Mono',monospace;min-width:130px;text-align:right}
+#orig{width:100%;border-radius:10px;border:1px solid var(--line)}
+video{width:100%;border-radius:10px;background:#000}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:20;max-width:90vw}
+#toast.on{opacity:1}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr;padding-top:32px}.hero h1{font-size:38px}
+  .how{grid-template-columns:1fr}
+  #studio{flex-direction:column;overflow:auto}
+  #tools,#side{width:auto;border:0;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap}
+  #tools .tool{width:auto;flex:1}#stage{min-height:340px}
+  #bar{flex-wrap:wrap}#fnum{min-width:0}
+}
 </style>
 </head>
 <body>
 <header>
-  <b>img2draw</b><span style="color:var(--mut)" id="sub">Turn any picture into a drawing you can edit</span>
-  <span class="sp"></span>
-  <button id="undo" disabled>↶ Undo</button><button id="redo" disabled>↷ Redo</button>
-  <button id="newimg" style="display:none">New image</button>
+  <a class="brand" href="." aria-label="img2draw home">img2draw</a>
+  <nav class="steps" aria-label="Progress">
+    <div class="step now" id="s1"><i>1</i>Upload</div><div class="bar"></div>
+    <div class="step" id="s2"><i>2</i><span>Drawing planned</span></div><div class="bar"></div>
+    <div class="step" id="s3"><i>3</i>Edit &amp; export</div>
+  </nav>
+  <div class="hbtns hidden" id="hbtns">
+    <button id="undo" disabled title="Ctrl+Z">Undo</button>
+    <button id="redo" disabled title="Ctrl+Y">Redo</button>
+    <button id="newimg">New image</button>
+  </div>
 </header>
 
-<div id="welcome">
-  <div id="drop">
-    <h1>Drop an image here</h1>
-    <p>PNG or JPG. Anime / cartoon art works best.</p>
-    <ol>
-      <li>Upload an image — it is turned into a step-by-step drawing.</li>
-      <li>Slide the timeline to any moment (outline → colors → shading → details).</li>
-      <li>Erase, paint, recolor or delete an object. <b>Your change stays in every later step.</b></li>
-    </ol><br>
-    <button class="primary" id="pickbtn">Choose file…</button>
-    <input type="file" id="file" accept="image/*" hidden>
-    <p id="status"></p>
+<main id="landing">
+  <section class="hero">
+    <div>
+      <h1>Watch any picture get <em>drawn</em>. Then edit it.</h1>
+      <p class="lead">img2draw rebuilds an image the way an artist would — outline, flat colors, shading, details — as a timeline you can scrub, erase into, repaint and export. Your edits stay in every later step.</p>
+      <div id="drop">
+        <h2>Drop an image here</h2>
+        <p>PNG, JPG or WebP · up to 20 MB · works best on anime and cartoon art</p>
+        <div class="row">
+          <button class="primary" id="pickbtn">Choose an image</button>
+          <button id="sample">Try a sample</button>
+        </div>
+        <input type="file" id="file" accept="image/png,image/jpeg,image/webp" hidden>
+        <div id="err" class="hidden" role="alert"></div>
+      </div>
+      <p class="eyebrow" style="margin-top:14px" id="where"></p>
+    </div>
+    <div class="gifwrap">
+      <img src="docs/naruto_drawing.gif" onerror="this.parentNode.classList.add('hidden')" alt="Animation of a character being drawn from outline to final details">
+      <small>A real replay: outline → colors → shading → details</small>
+    </div>
+  </section>
+  <section class="how" aria-label="How it works">
+    <div><span class="eyebrow">1 · Upload</span><b>It plans the drawing</b><span>Pen strokes are traced from the ink lines, then color shapes, then shadows, highlights and fine detail.</span></div>
+    <div><span class="eyebrow">2 · Scrub</span><b>Go to any moment</b><span>Slide the timeline or press play. Every step is a real object, not a video frame.</span></div>
+    <div><span class="eyebrow">3 · Edit</span><b>Changes carry forward</b><span>Select, delete, recolor, paint or erase at a step. Later steps respect it, and the final image matches your edits.</span></div>
+  </section>
+  <footer>Open source · <a href="https://github.com/Shashwat1729/img2draw">github.com/Shashwat1729/img2draw</a></footer>
+</main>
+
+<main id="processing" class="hidden" aria-live="polite">
+  <img id="pimg" alt="Your uploaded image">
+  <div class="pcol">
+    <h2>Planning your drawing</h2>
+    <div style="color:var(--mut)">Uploads are paused until this finishes. <span id="elapsed"></span></div>
+    <div class="track" role="progressbar" aria-label="Planning progress"><div id="pbar"></div></div>
+    <ul class="plist" id="plist">
+      <li>Tracing the pen outline</li><li>Finding color regions</li><li>Adding shading and detail</li><li>Final touch-up for an exact match</li>
+    </ul>
+    <button disabled>Upload another image (available when done)</button>
   </div>
-</div>
+</main>
 
-<div id="studio">
+<div id="studio" class="hidden">
   <div id="tools">
-    <h4>Tools</h4>
-    <button class="tool on" data-t="select">🖱️ <span>Select<small>click an object</small></span></button>
-    <button class="tool" data-t="brush">🖌️ <span>Brush<small>paint on the drawing</small></span></button>
-    <button class="tool" data-t="erase">🧽 <span>Eraser<small>rub out anything</small></span></button>
-
-    <div class="opt" id="o-brush" style="display:none">
+    <div class="eyebrow">Tools</div>
+    <button class="tool on" data-t="select"><span>Select</span><kbd>V</kbd></button>
+    <button class="tool" data-t="brush"><span>Brush</span><kbd>B</kbd></button>
+    <button class="tool" data-t="erase"><span>Eraser</span><kbd>E</kbd></button>
+    <div class="panel hidden" id="o-brush">
       <label>Color <input type="color" id="col" value="#e63946"></label>
-      <label>Size <input type="range" id="size" min="1" max="60" value="8"><span id="sizev">8</span></label>
+      <label>Size <input type="range" id="size" min="1" max="60" value="8" aria-label="Brush size"><span id="sizev" class="mono">8</span></label>
     </div>
-    <div class="opt" id="o-select">
-      <div id="selinfo" style="color:var(--mut)">Click anything on the picture to pick it.</div>
-      <label>New color <input type="color" id="rcol" value="#3aa0ff"></label>
-      <button id="recolor" disabled>Recolor object</button>
-      <button id="del" class="danger" disabled>Delete object</button>
-    </div>
-    <h4>View</h4>
-    <button id="cmp">Hold to compare with original</button>
-    <button id="vid" class="primary">▶ Watch as video</button>
-    <p style="color:var(--mut);font-size:12px;margin:0">Video re-draws the whole thing from start to end <i>including your edits</i>.</p>
+    <div class="note">Edits happen at the step shown below and <b>stay in every later step</b>.</div>
+    <div class="eyebrow" style="margin-top:8px">Keys</div>
+    <div style="font-size:13px;color:var(--mut)">Space play · ←/→ step · Ctrl+Z undo</div>
   </div>
 
   <div id="center">
-    <div id="msg">Slide the timeline to a moment, pick a tool, and edit. Later steps keep your change.</div>
+    <div id="msg" role="status">Slide the timeline to any step, pick a tool, and edit.</div>
     <div id="stage">
-      <div id="wrap"><img id="img" alt=""><canvas id="ov"></canvas></div>
-      <div id="busy">Working…</div>
+      <div id="wrap"><img id="img" alt="Current drawing step"><canvas id="ov"></canvas></div>
+      <div id="busy">Applying…</div>
     </div>
     <div id="bar">
-      <div id="row">
-        <button id="play">▶ Play</button>
-        <div id="scrub">
-          <div id="segs"></div>
-          <input type="range" id="frame" min="0" max="1" value="0">
-          <div id="labels"></div>
-        </div>
-        <span id="fnum" style="min-width:110px;text-align:right;color:var(--mut)">0 / 0</span>
-      </div>
+      <button id="play" class="dark" aria-label="Play">Play</button>
+      <div id="scrub"><div id="segs"></div><input type="range" id="frame" min="0" max="1" value="0" aria-label="Timeline step"><div id="labels"></div></div>
+      <div id="fnum">0 / 0</div>
     </div>
   </div>
 
   <div id="side">
-    <h4>Original</h4><img id="orig" alt="">
-    <h4>Similarity</h4>
-    <div class="kv"><span>Match with original</span><b id="psnr">–</b></div>
-    <div class="kv"><span>Current step</span><b id="stagename">–</b></div>
-    <h4>Replay video</h4>
-    <video id="player" controls style="display:none"></video>
+    <div class="eyebrow">Selected object</div>
+    <div class="panel" id="o-select">
+      <div id="selinfo" style="color:var(--mut)">Click anything on the drawing to select it.</div>
+      <label>New color <input type="color" id="rcol" value="#3aa0ff"></label>
+      <button id="recolor" disabled>Recolor</button>
+      <button id="del" class="danger" disabled>Delete object</button>
+    </div>
+    <div class="eyebrow" style="margin-top:8px">Compare</div>
+    <button id="cmp">Hold to see original</button>
+    <img id="orig" alt="Original image" class="hidden">
+    <div class="eyebrow" style="margin-top:8px">Export</div>
+    <button id="png" class="primary">Download PNG</button>
+    <button id="proj">Save editable project</button>
+    <button id="vid" class="dark">Watch as video</button>
+    <video id="player" controls class="hidden"></video>
   </div>
 </div>
+<div id="toast" role="status"></div>
 
 <script>
 const $=id=>document.getElementById(id);
-const COLORS={"Outline":"#8ea0c8","Flat colors":"#6cc3a0","Shadows":"#7a6cc3","Highlights":"#e8c46a","Details":"#e58f6a","Polish":"#c36ca0"};
-let info=null, frame=0, tool="select", picked=null, seq=0, playing=false, drawing=null, W=0, H=0;
+const COLORS={"Outline":"#8EA0C8","Flat colors":"#6CC3A0","Shadows":"#7A6CC3","Highlights":"#E8C46A","Details":"#E58F6A","Polish":"#C9C2B0"};
+const STATIC=!!window.STATIC_MODE;   // GitHub Pages: Python runs in a browser worker (static.js)
+let view="landing", locked=false, info=null, frame=0, tool="select", picked=null, seq=0, playing=false, drawing=null, W=0, H=0, edits=0;
 
-const STATIC=!!window.STATIC_MODE;   // GitHub Pages: Python runs in the browser (static.js)
-async function api(path, opt){
+async function api(path,opt){
   if(STATIC){const u=new URL(path,"http://x");return window.pyCall(u.pathname,Object.fromEntries(u.searchParams),opt&&opt.body?JSON.parse(opt.body):null)}
-  const r=await fetch(path,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
-const post=(p,q,body)=>{
-  q=Object.fromEntries(Object.entries(q).filter(([,v])=>v!==undefined));
+  const r=await fetch(path,opt);if(!r.ok){let m=await r.text();try{m=JSON.parse(m).error||m}catch(e){}throw new Error(m)}return r.json()}
+const post=(p,q,body)=>{q=Object.fromEntries(Object.entries(q).filter(([,v])=>v!==undefined));
   return api(p+"?"+new URLSearchParams(q),{method:"POST",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined})};
-const busy=(on,t)=>{$("busy").style.display=on?"flex":"none";if(t)$("busy").textContent=t};
 const say=t=>$("msg").textContent=t;
+let tt;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2600)}
+const busy=(on,t)=>{$("busy").style.display=on?"flex":"none";if(t)$("busy").textContent=t};
 
-// ---------- upload
+function show(v){
+  view=v;
+  $("landing").classList.toggle("hidden",v!=="landing");
+  $("processing").classList.toggle("hidden",v!=="processing");
+  $("studio").classList.toggle("hidden",v!=="studio");
+  $("hbtns").classList.toggle("hidden",v!=="studio");
+  const n={landing:1,processing:2,studio:3}[v];
+  [1,2,3].forEach(i=>{$("s"+i).className="step"+(i<n?" done":i===n?" now":"")});
+  $("s2").querySelector("span").textContent=v==="processing"?"Planning the drawing":"Drawing planned";
+  if(v==="studio")fit();
+}
+$("where").textContent=STATIC?"Runs entirely in your browser — your image is never uploaded.":"Running locally — your image stays on this computer.";
+
+// ---------- upload (one at a time)
 const drop=$("drop");
-$("pickbtn").onclick=()=>$("file").click();
-$("file").onchange=e=>e.target.files[0]&&upload(e.target.files[0]);
-["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over")}));
+function tryStart(file){
+  if(locked||view==="processing"){toast("Still planning the last image — please wait.");return}
+  if(!file)return;
+  if(!/^image\/(png|jpeg|webp)$/.test(file.type))return fail("That file is not a PNG, JPG or WebP image.");
+  if(file.size>20*1024*1024)return fail("That image is larger than 20 MB. Please use a smaller one.");
+  upload(file);
+}
+function fail(m){const e=$("err");e.textContent=m;e.classList.remove("hidden")}
+$("pickbtn").onclick=()=>!locked&&$("file").click();
+$("file").onchange=e=>{tryStart(e.target.files[0]);e.target.value=""};
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();if(!locked)drop.classList.add("over")}));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over")}));
-drop.addEventListener("drop",e=>e.dataTransfer.files[0]&&upload(e.dataTransfer.files[0]));
-window.addEventListener("paste",e=>{const f=[...e.clipboardData.files][0];if(f&&!$("studio").classList.contains("on"))upload(f)});
-$("newimg").onclick=()=>{$("studio").classList.remove("on");$("welcome").style.display="flex";$("newimg").style.display="none"};
+drop.addEventListener("drop",e=>tryStart(e.dataTransfer.files[0]));
+window.addEventListener("paste",e=>{const f=[...(e.clipboardData?e.clipboardData.files:[])][0];if(f)tryStart(f)});
+window.addEventListener("dragover",e=>e.preventDefault());window.addEventListener("drop",e=>e.preventDefault());
+$("sample").onclick=()=>{ // generated in the browser: no copyrighted art
+  const c=document.createElement("canvas");c.width=420;c.height=420;const g=c.getContext("2d");
+  g.fillStyle="#f4efe3";g.fillRect(0,0,420,420);
+  g.fillStyle="#9ad0f5";g.fillRect(0,300,420,120);
+  const blob=(x,y,r,col,ln)=>{g.beginPath();g.arc(x,y,r,0,7);if(col){g.fillStyle=col;g.fill()}if(ln){g.lineWidth=ln;g.strokeStyle="#1b1b22";g.stroke()}};
+  blob(210,215,120,"#f3b73b",5);blob(255,255,60,"#d89a24");blob(210,215,120,null,5);
+  blob(165,190,16,"#1b1b22");blob(255,190,16,"#1b1b22");blob(160,185,5,"#fff");blob(250,185,5,"#fff");
+  g.lineWidth=6;g.lineCap="round";g.strokeStyle="#1b1b22";g.beginPath();g.arc(210,235,45,.2,Math.PI-.2);g.stroke();
+  blob(210,95,34,"#e4572e",5);
+  c.toBlob(b=>tryStart(new File([b],"sample.png",{type:"image/png"})),"image/png");
+};
+$("newimg").onclick=()=>{
+  if(locked)return;
+  if(edits&&!confirm("Start a new image? Your edits will be lost unless you saved the project."))return;
+  stopPlay();$("err").classList.add("hidden");show("landing");
+};
 
+let t0,timer;
+window.onPlanProgress=(i,label)=>setStage(i,label);
+function setStage(i,label){
+  [...$("plist").children].forEach((li,k)=>li.className=k<i?"ok":k===i?"on":"");
+  $("pbar").style.width=Math.max(5,Math.min(100,(i<0?0.4:i+1)/4*100))+"%";
+  $("elapsed").dataset.note=i<0?label:"";
+}
 async function upload(file){
-  $("status").textContent="Analyzing the picture and planning the drawing… (this can take up to a minute)";
-  const fd=new FormData();fd.append("file",file);
+  locked=true;edits=0;$("err").classList.add("hidden");
+  $("pimg").src=URL.createObjectURL(file);
+  show("processing");setStage(0,"");t0=Date.now();
+  timer=setInterval(()=>{const s=Math.round((Date.now()-t0)/1000);const n=$("elapsed").dataset.note;$("elapsed").textContent=(n?n+" · ":"")+s+" s"},500);
+  let poll=null;
+  if(!STATIC)poll=setInterval(async()=>{try{const p=await api("/api/progress");if(p.busy)setStage(p.stage,p.label)}catch(e){}},700);
   try{
     let d;
     if(STATIC)d=await window.pyLoad(file);
-    else{const r=await fetch("/api/reconstruct?mode=balanced",{method:"POST",body:fd});
-      if(!r.ok)throw new Error(await r.text());d=await r.json()}
-    $("orig").src="data:image/png;base64,"+d.original;
-    $("psnr").textContent=d.metrics&&d.metrics.psnr>=99?"identical":"–";
+    else{const fd=new FormData();fd.append("file",file);
+      const r=await fetch("/api/reconstruct?mode=balanced",{method:"POST",body:fd});
+      if(!r.ok){let m=await r.text();try{m=JSON.parse(m).error||m}catch(e){}throw new Error(m)}d=await r.json()}
+    $("orig").src="data:image/png;base64,"+d.original;$("orig").classList.remove("hidden");
+    setStage(4,"");
     await loadInfo();
-    $("welcome").style.display="none";$("studio").classList.add("on");$("newimg").style.display="";
-    setFrame(info.frames);
-  }catch(err){$("status").textContent="Failed: "+err.message}
+    show("studio");setTool("select");await setFrame(info.frames);
+    say("Drag the timeline back to any step, pick a tool, and edit. Later steps keep your change.");
+  }catch(err){show("landing");fail("Could not process that image: "+err.message)}
+  finally{clearInterval(timer);if(poll)clearInterval(poll);locked=false}
 }
 
 // ---------- timeline
 async function loadInfo(){
   info=await api("/api/info");W=info.width;H=info.height;
-  const ov=$("ov");ov.width=W;ov.height=H;fit();
+  const o=$("ov");o.width=W;o.height=H;fit();
   $("frame").max=info.frames;
   $("undo").disabled=!info.can_undo;$("redo").disabled=!info.can_redo;
   const segs=$("segs"),lab=$("labels");segs.innerHTML="";lab.innerHTML="";
   info.stages.forEach(s=>{
     const w=Math.max(0,s.end-s.start)/info.frames*100;
-    const d=document.createElement("div");d.style.width=w+"%";d.style.background=COLORS[s.name]||"#888";d.title=s.name;
-    d.onclick=()=>setFrame(s.end);segs.appendChild(d);
-    const l=document.createElement("span");l.style.width=w+"%";l.textContent=w>7?s.name:"";lab.appendChild(l);
+    const d=document.createElement("div");d.style.width=w+"%";d.style.background=COLORS[s.name]||"#888";d.title=s.name+" — click to jump";
+    d.onclick=()=>stopPlay(()=>setFrame(s.end));segs.appendChild(d);
+    const l=document.createElement("span");l.style.width=w+"%";l.textContent=w>8?s.name.replace("Flat colors","Colors").replace("Highlights","Light"):"";lab.appendChild(l);
   });
 }
-function stageAt(f){let n="";for(const s of info.stages)if(f>s.start)n=s.name;return n||"Start"}
+function stageAt(f){let n="Start";for(const s of info.stages)if(f>s.start)n=s.name;return n}
 function fit(){
-  const st=$("stage"),sw=st.clientWidth-32,sh=st.clientHeight-32;
-  if(!W||sw<=0)return;
+  const st=$("stage"),sw=st.clientWidth-40,sh=st.clientHeight-40;
+  if(!W||sw<=0||sh<=0)return;
   const k=Math.min(sw/W,sh/H);
   $("wrap").style.width=Math.floor(W*k)+"px";$("wrap").style.height=Math.floor(H*k)+"px";
 }
 window.addEventListener("resize",fit);
-
 async function setFrame(f){
   f=Math.max(0,Math.min(info.frames,Math.round(f)));frame=f;
-  $("frame").value=f;$("fnum").textContent=f+" / "+info.frames;$("stagename").textContent=stageAt(f);
+  $("frame").value=f;$("fnum").textContent="step "+f+" / "+info.frames+" · "+stageAt(f);
   const my=++seq;
   const d=await api("/api/render?max_ops="+f);
   if(my!==seq)return;
   $("img").src="data:image/png;base64,"+d.reconstruction;
-  clearOv();if(picked&&tool==="select")pickAt(picked.x,picked.y,true);
+  clearOv();if(picked&&tool==="select")pickAt(picked.x,picked.y);
 }
-$("frame").oninput=e=>{playing=false;$("play").textContent="▶ Play";setFrame(+e.target.value)};
+function stopPlay(then){playing=false;$("play").textContent="Play";if(then)then()}
+$("frame").oninput=e=>stopPlay(()=>setFrame(+e.target.value));
 $("play").onclick=async()=>{
-  if(playing){playing=false;$("play").textContent="▶ Play";return}
-  playing=true;$("play").textContent="⏸ Pause";
+  if(playing){stopPlay();return}
+  playing=true;$("play").textContent="Pause";
   if(frame>=info.frames)frame=0;
   const stepN=Math.max(1,Math.ceil(info.frames/150));
-  while(playing&&frame<info.frames){await setFrame(frame+stepN)}
-  playing=false;$("play").textContent="▶ Play";
+  while(playing&&frame<info.frames)await setFrame(frame+stepN);
+  stopPlay();
 };
 
 // ---------- tools
-document.querySelectorAll(".tool").forEach(b=>b.onclick=()=>{
-  tool=b.dataset.t;document.querySelectorAll(".tool").forEach(x=>x.classList.toggle("on",x===b));
-  $("o-brush").style.display=tool==="brush"?"flex":"none";
-  $("o-select").style.display=tool==="select"?"flex":"none";
-  $("ov").style.cursor=tool==="select"?"pointer":"crosshair";
-  clearOv();
+function setTool(t){
+  tool=t;document.querySelectorAll(".tool").forEach(x=>x.classList.toggle("on",x.dataset.t===t));
+  $("o-brush").classList.toggle("hidden",t!=="brush");
+  $("ov").style.cursor=t==="select"?"pointer":"crosshair";clearOv();
   say({select:"Click an object to select it, then delete or recolor it.",
-       brush:"Drag on the picture to paint. The stroke is added at this timeline step and stays afterwards.",
-       erase:"Drag to rub out. Later steps will not repaint what you erased."}[tool]);
-});
+       brush:"Drag on the drawing to paint. The stroke is added at this step and stays afterwards.",
+       erase:"Drag to rub out. Later steps will not repaint what you erased."}[t]);
+}
+document.querySelectorAll(".tool").forEach(b=>b.onclick=()=>setTool(b.dataset.t));
 $("size").oninput=e=>$("sizev").textContent=e.target.value;
-function pt(e){const r=$("ov").getBoundingClientRect();return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]}
-function clearOv(){$("ov").getContext("2d").clearRect(0,0,W,H)}
-
 const ov=$("ov");
+function pt(e){const r=ov.getBoundingClientRect();return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]}
+function clearOv(){ov.getContext("2d").clearRect(0,0,W,H)}
 ov.addEventListener("pointerdown",e=>{
-  const p=pt(e);
+  if(locked)return;const p=pt(e);
   if(tool==="select"){pickAt(Math.floor(p[0]),Math.floor(p[1]));return}
   ov.setPointerCapture(e.pointerId);drawing=[p];
 });
 ov.addEventListener("pointermove",e=>{
   if(!drawing)return;drawing.push(pt(e));
-  const c=ov.getContext("2d");clearOv();c.lineCap=c.lineJoin="round";c.lineWidth=+$("size").value;
+  const c=ov.getContext("2d");clearOv();c.lineCap=c.lineJoin="round";
+  c.lineWidth=+$("size").value*(tool==="erase"?1.5:1);
   c.strokeStyle=tool==="erase"?"rgba(255,255,255,.85)":$("col").value;
   c.beginPath();drawing.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));c.stroke();
 });
@@ -245,51 +377,65 @@ ov.addEventListener("pointerup",async()=>{
   if(!drawing)return;let pts=drawing;drawing=null;
   if(pts.length<2)pts=[pts[0],[pts[0][0]+.1,pts[0][1]]];
   const sz=+$("size").value;
-  if(tool==="brush"){
-    const h=$("col").value;const c=[1,3,5].map(i=>parseInt(h.substr(i,2),16));
-    await edit("/api/edit/brush",{frame,width:sz},{points:pts,color:c});
-  }else await edit("/api/edit/erase",{frame,width:sz*1.5},{points:pts});
+  if(tool==="brush"){const h=$("col").value;const c=[1,3,5].map(i=>parseInt(h.substr(i,2),16));
+    await edit("/api/edit/brush",{frame,width:sz},{points:pts,color:c},"Paint added")}
+  else await edit("/api/edit/erase",{frame,width:sz*1.5},{points:pts},"Erased");
 });
-
-async function edit(path,q,body){
-  busy(true,"Applying edit…");
+async function edit(path,q,body,what){
+  if(locked)return;locked=true;busy(true,"Applying…");
   try{
-    await post(path,q,body);
-    await loadInfo();
-    await setFrame(frame+1);   // show the frame where the edit now exists
-    say("Edit added at step "+(frame)+". Scrub forward — it stays in every later step.");
-  }catch(err){say("Edit failed: "+err.message)}
-  busy(false);
+    await post(path,q,body);edits++;
+    await loadInfo();await setFrame(frame+1);
+    say(what+" at step "+(frame-1)+". Scrub forward — it stays in every later step.");
+  }catch(err){say("Edit failed: "+err.message);toast("Edit failed")}
+  busy(false);locked=false;
 }
-
-async function pickAt(x,y,quiet){
+async function pickAt(x,y){
   const d=await api(`/api/pick?x=${x}&y=${y}&frame=${frame}`);
   clearOv();
-  if(!d.id){picked=null;$("selinfo").textContent="Nothing drawn there yet at this step.";$("del").disabled=$("recolor").disabled=true;return}
+  if(!d.id){picked=null;$("selinfo").textContent="Nothing is drawn there at this step.";$("del").disabled=$("recolor").disabled=true;return}
   picked={id:d.id,x,y};
-  const im=new Image();im.onload=()=>{const c=ov.getContext("2d");c.drawImage(im,0,0)};im.src="data:image/png;base64,"+d.mask;
-  $("selinfo").innerHTML="Selected <b>"+d.id+"</b><br>"+d.area+" px";
+  const im=new Image();im.onload=()=>ov.getContext("2d").drawImage(im,0,0);im.src="data:image/png;base64,"+d.mask;
+  $("selinfo").innerHTML="Selected <b>"+d.id+"</b> · "+d.area+" px";
   $("del").disabled=$("recolor").disabled=false;
 }
-$("del").onclick=async()=>{if(!picked)return;const id=picked.id;picked=null;await edit("/api/edit/delete",{target:id,frame});$("selinfo").textContent="Deleted. Click another object.";$("del").disabled=$("recolor").disabled=true};
-$("recolor").onclick=async()=>{
-  if(!picked)return;const h=$("rcol").value;const c=[1,3,5].map(i=>parseInt(h.substr(i,2),16));
-  await edit("/api/edit/recolor",{target:picked.id,frame},{color:c});
+$("del").onclick=async()=>{if(!picked)return;const id=picked.id;picked=null;await edit("/api/edit/delete",{target:id,frame},undefined,"Object deleted");$("selinfo").textContent="Deleted. Click another object.";$("del").disabled=$("recolor").disabled=true};
+$("recolor").onclick=async()=>{if(!picked)return;const h=$("rcol").value;const c=[1,3,5].map(i=>parseInt(h.substr(i,2),16));
+  await edit("/api/edit/recolor",{target:picked.id,frame},{color:c},"Recolored")};
+
+// ---------- undo / compare / export
+for(const k of ["undo","redo"])$(k).onclick=async()=>{if(locked)return;await post("/api/"+k,{});edits=Math.max(0,edits+(k==="undo"?-1:1));await loadInfo();await setFrame(Math.min(frame,info.frames))};
+const hold=on=>{const i=$("img");if(on){if(!i.dataset.keep){i.dataset.keep=i.src;i.src=$("orig").src}}else if(i.dataset.keep){i.src=i.dataset.keep;delete i.dataset.keep}};
+$("cmp").onpointerdown=()=>hold(true);window.addEventListener("pointerup",()=>hold(false));
+function save(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+$("png").onclick=async()=>{const d=await api("/api/render?max_ops="+info.frames);const b=await (await fetch("data:image/png;base64,"+d.reconstruction)).blob();save(b,"drawing.png");toast("Saved the final image")};
+$("proj").onclick=async()=>{
+  const p=STATIC?await api("/api/project"):await (await fetch("/api/project")).json();
+  save(new Blob([JSON.stringify(p)],{type:"application/json"}),"drawing.project.json");toast("Saved the editable project");
+};
+if(STATIC)$("vid").classList.add("hidden");
+$("vid").onclick=async()=>{
+  if(locked)return;locked=true;busy(true,"Rendering the full drawing video… (about a minute)");
+  try{const r=await fetch("/api/replay.mp4?seconds=25");if(!r.ok)throw new Error(await r.text());
+    const v=$("player");v.src=URL.createObjectURL(await r.blob());v.classList.remove("hidden");v.play()}
+  catch(err){toast("Video failed: "+err.message)}
+  busy(false);locked=false;
 };
 
-// ---------- undo / redo / compare / video
-for(const k of ["undo","redo"])$(k).onclick=async()=>{await post("/api/"+k,{});await loadInfo();await setFrame(Math.min(frame,info.frames))};
-const hold=on=>{if(on)$("img").dataset.keep=$("img").src,$("img").src=$("orig").src;else if($("img").dataset.keep)$("img").src=$("img").dataset.keep};
-$("cmp").onpointerdown=()=>hold(true);window.addEventListener("pointerup",()=>hold(false));
-if(STATIC){$("vid").style.display="none";$("vid").nextElementSibling.style.display="none"}
-$("vid").onclick=async()=>{
-  busy(true,"Rendering the full drawing video… (about a minute)");
-  try{
-    const r=await fetch("/api/replay.mp4?seconds=25");if(!r.ok)throw new Error(await r.text());
-    const u=URL.createObjectURL(await r.blob());const v=$("player");v.src=u;v.style.display="block";v.play();
-  }catch(err){say("Video failed: "+err.message)}
-  busy(false);
-};
+// ---------- keyboard
+window.addEventListener("keydown",e=>{
+  const a=document.activeElement;
+  if(view!=="studio"||(/INPUT|TEXTAREA/.test(a.tagName)&&a.type!=="range"))return;
+  const k=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&k==="z"){e.preventDefault();$("undo").click()}
+  else if((e.ctrlKey||e.metaKey)&&k==="y"){e.preventDefault();$("redo").click()}
+  else if(e.ctrlKey||e.metaKey||e.altKey)return;
+  else if(k==="v")setTool("select");else if(k==="b")setTool("brush");else if(k==="e")setTool("erase");
+  else if(k===" "){e.preventDefault();$("play").click()}
+  else if(k==="arrowleft"){e.preventDefault();stopPlay(()=>setFrame(frame-(e.shiftKey?50:5)))}
+  else if(k==="arrowright"){e.preventDefault();stopPlay(()=>setFrame(frame+(e.shiftKey?50:5)))}
+});
+window.addEventListener("beforeunload",e=>{if(locked||edits){e.preventDefault();e.returnValue=""}});
 </script>
 </body>
 </html>

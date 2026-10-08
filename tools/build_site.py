@@ -13,12 +13,12 @@ for m in MODULES:
 (out / "modules.json").write_text(str(MODULES).replace("'", '"'))
 html = (root / "frontend/index.html").read_text(encoding="utf-8")
 inject = ('<script>window.STATIC_MODE=true</script>\n'
-          '<script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>\n'
           '<script src="static.js"></script>\n')
 html = html.replace("<script>\nconst $=", inject + "<script>\nconst $=", 1)
 (out / "index.html").write_text(html, encoding="utf-8")
-shutil.copy(root / "frontend/static.js", out / "static.js")
-for f in ("luffy", "tanjiro"):
-    pass
+for f in ("static.js", "worker.js"):
+    shutil.copy(root / "frontend" / f, out / f)
+(out / "docs").mkdir()
+shutil.copy(root / "docs/naruto_drawing.gif", out / "docs/naruto_drawing.gif")
 (out / ".nojekyll").write_text("")
 print("built", out)

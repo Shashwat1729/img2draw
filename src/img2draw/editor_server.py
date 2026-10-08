@@ -47,8 +47,15 @@ def index():
 async def reconstruct(file: UploadFile = File(...), mode: str = "balanced"):
     data = await file.read()
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)[..., ::-1]
-    STATE["original"] = np.ascontiguousarray(img)
-    STATE["project"] = planner.plan(STATE["original"], mode=mode)
+    if STATE.get("busy"):
+        return JSONResponse({"error": "Already processing an image. Wait for it to finish."}, status_code=409)
+    STATE["busy"] = True
+    try:
+        STATE["original"] = np.ascontiguousarray(img)
+        from starlette.concurrency import run_in_threadpool
+        STATE["project"] = await run_in_threadpool(planner.plan, STATE["original"], mode)
+    finally:
+        STATE["busy"] = False
     STATE["video"] = None
     STATE["history"].clear(); STATE["future"].clear()
     rendered = render_project(STATE["project"])
@@ -158,6 +165,17 @@ def add_brush(points: list[list[float]], color: list[int], width: float = 8, opa
 def add_erase(points: list[list[float]] = Body(embed=True), width: float = 12, frame: int | None = None):
     _add_edit({"type": "ERASER", "points": points, "width": width}, frame)
     return {"ok": True}
+
+
+@app.get("/api/progress")
+def progress():
+    from .artist import PROGRESS
+    return {**PROGRESS, "busy": bool(STATE.get("busy"))}
+
+
+@app.get("/api/project")
+def project_json():
+    return JSONResponse(STATE["project"], headers={"Content-Disposition": "attachment; filename=drawing.project.json"})
 
 
 @app.get("/api/info")
