@@ -1,0 +1,11 @@
+{
+  "mae": 0.0,
+  "mse": 0.0,
+  "psnr": Infinity,
+  "ssim": 1.0,
+  "ms_ssim": 1.0,
+  "edge_difference": 0.0,
+  "color_difference": 0.0,
+  "structural_difference": 0.0,
+  "lpips": null
+}

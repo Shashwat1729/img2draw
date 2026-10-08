@@ -1,0 +1,4 @@
+﻿mode: high_fidelity
+refine_iters: 4
+k_clusters: 10
+

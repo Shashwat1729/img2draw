@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "img2draw"
+version = "0.1.0"
+description = "Inverse drawing: image to editable, replayable drawing program with high-fidelity reconstruction"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy", "pillow", "opencv-python-headless", "scikit-learn", "scipy",
+  "fastapi", "uvicorn", "pyyaml",
+]
+
+[project.optional-dependencies]
+lpips = ["lpips", "torch", "torchvision"]
+diffvg = ["diffvg"]
+vtracer = ["vtracer"]
+dev = ["pytest"]
+
+[project.scripts]
+img2draw = "img2draw.pipeline:main"
+img2draw-server = "img2draw.editor_server:main"
+img2draw-bench = "img2draw.benchmark:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

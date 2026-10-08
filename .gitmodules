@@ -1,0 +1,12 @@
+[submodule "third_party/vtracer"]
+	path = third_party/vtracer
+	url = https://github.com/visioncortex/vtracer
+[submodule "third_party/diffvg"]
+	path = third_party/diffvg
+	url = https://github.com/BachiLi/diffvg
+[submodule "third_party/LayerTracer"]
+	path = third_party/LayerTracer
+	url = https://github.com/showlab/LayerTracer
+[submodule "third_party/COVec"]
+	path = third_party/COVec
+	url = https://github.com/decade-de/COVec

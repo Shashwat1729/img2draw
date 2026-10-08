@@ -1,0 +1,4 @@
+﻿mode: fast
+refine_iters: 4
+k_clusters: 4
+

@@ -1,0 +1,8 @@
+numpy
+pillow
+opencv-python-headless
+scikit-learn
+scipy
+fastapi
+uvicorn
+pyyaml

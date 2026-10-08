@@ -1,0 +1,7 @@
+image,mode,seconds,operations,layers,mae,mse,psnr,ssim,ms_ssim,edge_difference,color_difference,structural_difference,lpips
+face.png,balanced,3.92,6,5,0.0048,0.0048,71.3541,1.0,1.0,0.0,0.0048,0.0,
+gradient.png,balanced,0.15,11,6,0.0,0.0,inf,1.0,1.0,0.0,0.0,0.0,
+logo.png,balanced,0.11,8,6,0.0,0.0,inf,1.0,1.0,0.0,0.0,0.0,
+noisy.png,balanced,0.24,35,5,0.3046,0.3046,53.2928,0.9991,0.9986,0.007,0.5971,0.0045,
+sphere.png,balanced,0.16,11,6,0.0,0.0,inf,1.0,1.0,0.0,0.0,0.0,
+stripes.png,balanced,0.11,6,6,0.0,0.0,inf,1.0,1.0,0.0,0.0,0.0,

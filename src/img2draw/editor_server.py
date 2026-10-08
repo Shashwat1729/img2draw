@@ -1,0 +1,175 @@
+"""FastAPI editor backend: load/reconstruct, render, edit ops, layers,
+undo/redo, timeline, metrics, project save/load, export."""
+from __future__ import annotations
+
+import base64
+import copy
+import io
+import json
+import tempfile
+from pathlib import Path
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
+from PIL import Image
+
+from . import metrics, planner, schema
+from .decompose import load_image
+from .renderer import render_project, export_svg, export_png, export_webp
+
+app = FastAPI(title="img2draw editor")
+STATE: dict = {"project": None, "original": None, "history": [], "future": [], "max_ops": None}
+
+FRONTEND = Path(__file__).parent.parent.parent / "frontend" / "index.html"
+
+
+def _png_b64(arr: np.ndarray) -> str:
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _snapshot():
+    STATE["history"].append(copy.deepcopy(STATE["project"]))
+    STATE["future"].clear()
+    if len(STATE["history"]) > 50:
+        STATE["history"].pop(0)
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTMLResponse(FRONTEND.read_text(encoding="utf-8"))
+
+
+@app.post("/api/reconstruct")
+async def reconstruct(file: UploadFile = File(...), mode: str = "balanced"):
+    data = await file.read()
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)[..., ::-1]
+    STATE["original"] = np.ascontiguousarray(img)
+    STATE["project"] = planner.plan(STATE["original"], mode=mode)
+    from .pipeline import refine
+    STATE["project"] = refine(STATE["project"], STATE["original"])
+    STATE["history"].clear(); STATE["future"].clear()
+    rendered = render_project(STATE["project"])
+    return {"metrics": metrics.full_report(STATE["original"], rendered),
+            "reconstruction": _png_b64(rendered),
+            "original": _png_b64(STATE["original"]),
+            "layers": [{"id": l["id"], "name": l["name"], "visible": l["visible"],
+                        "opacity": l["opacity"], "blend_mode": l["blend_mode"],
+                        "ops": len(l["operations"])} for l in STATE["project"]["layers"]],
+            "op_count": planner.op_count(STATE["project"])}
+
+
+@app.get("/api/render")
+def render(max_ops: int | None = None):
+    if STATE["project"] is None:
+        return JSONResponse({"error": "no project"}, status_code=400)
+    rendered = render_project(STATE["project"], max_ops=max_ops)
+    out = {"reconstruction": _png_b64(rendered)}
+    if max_ops is not None and STATE["original"] is not None:
+        out["difference"] = _png_b64(metrics.error_map(STATE["original"], rendered))
+    return out
+
+
+@app.get("/api/compare")
+def compare():
+    proj, orig = STATE["project"], STATE["original"]
+    if proj is None or orig is None:
+        return JSONResponse({"error": "no project"}, status_code=400)
+    r = render_project(proj)
+    return {"reconstruction": _png_b64(r),
+            "difference": _png_b64(metrics.error_map(orig, r)),
+            "heatmap": _png_b64(metrics.error_heatmap(orig, r)),
+            "overlay": _png_b64((orig.astype(float) * .5 + r.astype(float) * .5).astype(np.uint8)),
+            "metrics": metrics.full_report(orig, r)}
+
+
+@app.post("/api/layer/{layer_id}")
+def update_layer(layer_id: str, visible: bool | None = None, opacity: float | None = None,
+                 blend_mode: str | None = None, name: str | None = None):
+    _snapshot()
+    for l in STATE["project"]["layers"]:
+        if l["id"] == layer_id:
+            if visible is not None: l["visible"] = visible
+            if opacity is not None: l["opacity"] = opacity
+            if blend_mode is not None: l["blend_mode"] = blend_mode
+            if name is not None: l["name"] = name
+            return {"ok": True}
+    return JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.post("/api/layer/{layer_id}/delete")
+def delete_layer(layer_id: str):
+    _snapshot()
+    STATE["project"]["layers"] = [l for l in STATE["project"]["layers"] if l["id"] != layer_id]
+    return {"ok": True}
+
+
+@app.post("/api/layers/reorder")
+def reorder(ids: list[str]):
+    _snapshot()
+    by_id = {l["id"]: l for l in STATE["project"]["layers"]}
+    STATE["project"]["layers"] = [by_id[i] for i in ids if i in by_id]
+    return {"ok": True}
+
+
+@app.post("/api/edit/brush")
+def add_brush(points: list[list[float]], color: list[int], width: float = 8, opacity: float = 1.0):
+    _snapshot()
+    layer = next((l for l in STATE["project"]["layers"] if l["name"] == "Edits"), None)
+    if layer is None:
+        layer = schema.new_layer("layer_edits", "Edits", type_="raster")
+        STATE["project"]["layers"].append(layer)
+    layer["operations"].append({"type": "BRUSH_STROKE", "points": points, "color": color,
+                                "width": width, "opacity": opacity})
+    return {"ok": True}
+
+
+@app.post("/api/undo")
+def undo():
+    if STATE["history"]:
+        STATE["future"].append(copy.deepcopy(STATE["project"]))
+        STATE["project"] = STATE["history"].pop()
+    return {"ok": True}
+
+
+@app.post("/api/redo")
+def redo():
+    if STATE["future"]:
+        STATE["history"].append(copy.deepcopy(STATE["project"]))
+        STATE["project"] = STATE["future"].pop()
+    return {"ok": True}
+
+
+@app.post("/api/project/save")
+def save(path: str = "project.json"):
+    schema.save_project(STATE["project"], path)
+    return {"ok": True, "path": path}
+
+
+@app.post("/api/project/load")
+def load(path: str):
+    STATE["project"] = schema.load_project(path)
+    STATE["history"].clear(); STATE["future"].clear()
+    return {"ok": True}
+
+
+@app.post("/api/export/{fmt}")
+def export(fmt: str, path: str = "export"):
+    if fmt == "png": export_png(STATE["project"], path + ".png")
+    elif fmt == "webp": export_webp(STATE["project"], path + ".webp")
+    elif fmt == "svg": export_svg(STATE["project"], path + ".svg")
+    elif fmt == "project": schema.save_project(STATE["project"], path + ".project.json")
+    else: return JSONResponse({"error": "bad format"}, status_code=400)
+    return {"ok": True}
+
+
+def main():
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+if __name__ == "__main__":
+    main()
