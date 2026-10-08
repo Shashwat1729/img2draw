@@ -15,10 +15,24 @@ from sklearn.cluster import KMeans
 from . import schema
 
 
-def load_image(path: str) -> np.ndarray:
-    img = cv2.imread(path, cv2.IMREAD_COLOR)
+def load_image(path: str, max_side: int = 1024) -> np.ndarray:
+    """RGB uint8. Transparency is composited on white; large images are
+    downscaled (INTER_AREA) so the longest side is at most max_side."""
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if img is None:
         raise FileNotFoundError(path)
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.dtype != np.uint8:
+        img = (img.astype(np.float32) / (65535.0 if img.dtype == np.uint16 else 1.0)
+               * (255.0 if img.dtype == np.uint16 else 1.0)).clip(0, 255).astype(np.uint8)
+    if img.shape[2] == 4:
+        a = img[..., 3:4].astype(np.float32) / 255.0
+        img = (img[..., :3] * a + 255.0 * (1 - a)).round().astype(np.uint8)
+    h, w = img.shape[:2]
+    if max(h, w) > max_side:
+        s = max_side / max(h, w)
+        img = cv2.resize(img, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA)
     return img[..., ::-1].copy()
 
 

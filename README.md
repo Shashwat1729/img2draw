@@ -91,6 +91,26 @@ from a finished raster image — jointly considering reconstruction fidelity,
 semantic structure, editability, drawing progression, and representation
 complexity, with fidelity as the hard constraint.
 
+## Artist-style drawing + live replay
+
+`artist.py` plans the way a person draws: **Outline** (pen strokes traced from ink
+lines: skeleton + sub-pixel width) -> **Flat colors** (big blocks, large to small,
+sub-pixel contours) -> **Shadows** -> **Highlights** -> **Details** (error-guided
+tone shapes) -> **Polish** (small signed touch-up tiles until the canvas equals
+the source; `--tol N` stops early).
+
+```bash
+python -m img2draw.pipeline some_anime.png --out out/x --video --seconds 30
+```
+Writes project JSON, `*.stages.png` (stage-by-stage sheet), `*.structure.png`
+(before polish), metrics, and `*.replay.mp4`: one continuous video, original on the
+left, pen strokes growing with a pen-tip cursor, color shapes spreading from a seed,
+polish wiping in. No cuts between stages.
+
+Tested on Luffy / Naruto / Tanjiro (fetched locally into `testdata/`, git-ignored):
+final PSNR 100 dB (pixel-exact), structure-only PSNR ~21 dB / SSIM ~0.8-0.86 --
+the structured stages carry the look, polish carries the last pixels.
+
 ## Limitations
 
 - Vector layer reconstruction is approximate for noisy/photographic content;

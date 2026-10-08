@@ -6,3 +6,4 @@ server_err.log
 api_test.json
 *.egg-info/
 .ipynb_checkpoints/
+testdata/

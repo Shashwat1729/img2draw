@@ -12,7 +12,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from PIL import Image
 
 from . import metrics, planner, schema
@@ -49,8 +49,7 @@ async def reconstruct(file: UploadFile = File(...), mode: str = "balanced"):
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)[..., ::-1]
     STATE["original"] = np.ascontiguousarray(img)
     STATE["project"] = planner.plan(STATE["original"], mode=mode)
-    from .pipeline import refine
-    STATE["project"] = refine(STATE["project"], STATE["original"])
+    STATE["video"] = None
     STATE["history"].clear(); STATE["future"].clear()
     rendered = render_project(STATE["project"])
     return {"metrics": metrics.full_report(STATE["original"], rendered),
@@ -60,6 +59,17 @@ async def reconstruct(file: UploadFile = File(...), mode: str = "balanced"):
                         "opacity": l["opacity"], "blend_mode": l["blend_mode"],
                         "ops": len(l["operations"])} for l in STATE["project"]["layers"]],
             "op_count": planner.op_count(STATE["project"])}
+
+
+@app.get("/api/replay.mp4")
+def replay(seconds: float = 30.0):
+    """Continuous live-drawing video of the current project (cached until edited)."""
+    if STATE["project"] is None:
+        return JSONResponse({"error": "no project"}, status_code=400)
+    from .replay import save_video
+    path = Path(tempfile.gettempdir()) / "img2draw_replay.mp4"
+    save_video(STATE["project"], path, seconds=seconds, original=STATE["original"])
+    return FileResponse(path, media_type="video/mp4")
 
 
 @app.get("/api/render")

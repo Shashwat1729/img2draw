@@ -8,49 +8,46 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import metrics, planner, schema
-from .renderer import render_project
+from . import artist, metrics, schema
+from .renderer import render_frames, render_project
 
 
-def refine(project: dict, img: np.ndarray, iterations: int = 4, tol: float = 1.5) -> dict:
-    """Cascade of signed correction layers fitted to the remaining error.
-
-    Each layer corrects up to +/-127; stacking few layers covers the full
-    +/-255 range so a converged cascade reproduces the source exactly
-    (within renderer quantization).
-    """
-    from .schema import new_layer, op_image_patch
-    for it in range(iterations):
-        rendered = render_project(project)
-        err = img.astype(np.int16) - rendered.astype(np.int16)
-        if int(np.abs(err).max()) <= tol:
-            break
-        corr = new_layer(f"layer_correction_{it + 1}", f"Correction {it + 1}", type_="raster")
-        corr["blend_mode"] = "add_signed"
-        patch = np.clip(err + 128, 0, 255).astype(np.uint8)
-        corr["operations"].append(op_image_patch(0, 0, patch))
-        project["layers"].append(corr)
+def refine(project: dict, img: np.ndarray, iterations: int = 4, tol: float = 0) -> dict:
+    """Append signed correction (polish) tiles until the render is within tol."""
+    artist.polish(project, img, tol=int(tol), passes=iterations)
     return project
 
 
-def reconstruct(path: str, mode: str = "balanced", out_dir: str = "out", refine_iters: int = 3) -> dict:
+def reconstruct(path: str, mode: str = "balanced", out_dir: str = "out", refine_iters: int = 3,
+                video: bool = False, seconds: float = 30.0, tol: int | None = None) -> dict:
     from .decompose import load_image
+    from PIL import Image
     img = load_image(path)
-    project = planner.plan(img, mode=mode)
-    project = refine(project, img, iterations=refine_iters)
+    project = artist.plan(img, mode=mode, tol=tol)
     rendered = render_project(project)
+    structure = render_project(project, project["metadata"]["structure_ops"])
     report = metrics.full_report(img, rendered)
+    report["structure_psnr"] = metrics.psnr(img, structure)
+    report["structure_ssim"] = metrics.ssim(img, structure)
+    report["stages"] = project["metadata"]["stages"]
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = Path(path).stem
     schema.save_project(project, out / f"{stem}.project.json")
-    from PIL import Image
     Image.fromarray(rendered).save(out / f"{stem}.reconstruction.png")
+    Image.fromarray(structure).save(out / f"{stem}.structure.png")
     Image.fromarray(metrics.error_map(img, rendered)).save(out / f"{stem}.difference.png")
     Image.fromarray(metrics.error_heatmap(img, rendered)).save(out / f"{stem}.heatmap.png")
     overlay = (img.astype(float) * 0.5 + rendered.astype(float) * 0.5).astype(np.uint8)
     Image.fromarray(overlay).save(out / f"{stem}.overlay.png")
+    steps = [s["end"] for s in project["metadata"]["stages"]]
+    snaps = dict(render_frames(project, steps))
+    sheet = np.hstack([img] + [snaps[e] for e in steps])
+    Image.fromarray(sheet).save(out / f"{stem}.stages.png")
     (out / f"{stem}.metrics.json").write_text(json.dumps(report, indent=2))
+    if video:
+        from .replay import save_video
+        save_video(project, out / f"{stem}.replay.mp4", seconds=seconds, original=img)
     return {"project": project, "rendered": rendered, "metrics": report}
 
 
@@ -59,9 +56,11 @@ def main(argv=None):
     ap.add_argument("image")
     ap.add_argument("--mode", default="balanced", choices=["fast", "balanced", "high_fidelity", "research"])
     ap.add_argument("--out", default="out")
-    ap.add_argument("--iters", type=int, default=3)
+    ap.add_argument("--video", action="store_true", help="write the live-drawing replay mp4")
+    ap.add_argument("--seconds", type=float, default=30.0)
+    ap.add_argument("--tol", type=int, default=None, help="allowed max pixel error (0 = exact copy of source)")
     args = ap.parse_args(argv)
-    result = reconstruct(args.image, mode=args.mode, out_dir=args.out, refine_iters=args.iters)
+    result = reconstruct(args.image, mode=args.mode, out_dir=args.out, video=args.video, seconds=args.seconds, tol=args.tol)
     print(json.dumps(result["metrics"], indent=2))
 
 

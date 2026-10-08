@@ -33,6 +33,8 @@
  <button onclick="setView('overlay')">Overlay</button>
  <h3>Layers</h3>
  <div id="layers"></div>
+ <h3>Live drawing</h3>
+ <button onclick="watch()">Watch it being drawn</button>
  <h3>Timeline</h3>
  <button onclick="play()">▶</button><button onclick="pause()">⏸</button>
  <button onclick="restart()">⟲</button>
@@ -55,6 +57,8 @@
   <div><h4>Original / View</h4><img id="view"></div>
   <div><h4>Reconstruction / Timeline</h4><img id="recon"></div>
  </div>
+ <h4>Live replay</h4>
+ <video id="vid" controls style="max-width:100%"></video>
  <h4>Metrics</h4>
  <div class="metrics" id="metrics"></div>
 </section>
@@ -101,6 +105,9 @@ function setView(){
          view==='overlay'? 'data:image/png;base64,'+overlayB64 :
          'data:image/png;base64,'+reconB64;
  document.getElementById('recon').src='data:image/png;base64,'+reconB64;
+}
+async function watch(){
+ const v=document.getElementById('vid'); v.src='/api/replay.mp4?t='+Date.now(); v.play();
 }
 async function scrub(){
  const n=document.getElementById('scrub').value;
