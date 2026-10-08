@@ -11,7 +11,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
+from fastapi import Body, FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from PIL import Image
 
@@ -140,7 +140,8 @@ def _add_edit(op: dict, frame: int | None):
     tl = timeline(STATE["project"])
     n = len(tl) if frame is None else min(max(frame, 0), len(tl))
     prev = tl[n - 1][1].get("t", n - 1) if n else -1
-    op["t"] = prev + 0.5 if n < len(tl) else prev + 1
+    nxt = tl[n][1].get("t", n) if n < len(tl) else prev + 1
+    op["t"] = (prev + nxt) / 2 if n < len(tl) else prev + 1
     _snapshot()
     _edit_layer()["operations"].append(op)
 
@@ -154,15 +155,43 @@ def add_brush(points: list[list[float]], color: list[int], width: float = 8, opa
 
 
 @app.post("/api/edit/erase")
-def add_erase(points: list[list[float]], width: float = 12, frame: int | None = None):
+def add_erase(points: list[list[float]] = Body(embed=True), width: float = 12, frame: int | None = None):
     _add_edit({"type": "ERASER", "points": points, "width": width}, frame)
     return {"ok": True}
 
 
+@app.get("/api/info")
+def info():
+    """Frame count, stage boundaries (as frame numbers), undo/redo availability."""
+    from .renderer import timeline
+    if STATE["project"] is None:
+        return JSONResponse({"error": "no project"}, status_code=400)
+    tl = timeline(STATE["project"])
+    ts = [op.get("t", i) for i, (_, op) in enumerate(tl)]
+    stages = [{"name": st["name"], "start": sum(t < st["start"] for t in ts),
+               "end": sum(t < st["end"] for t in ts)}
+              for st in STATE["project"]["metadata"].get("stages", [])]
+    return {"frames": len(tl), "stages": stages, "width": STATE["project"]["canvas"]["width"],
+            "height": STATE["project"]["canvas"]["height"],
+            "can_undo": bool(STATE["history"]), "can_redo": bool(STATE["future"])}
+
+
 @app.get("/api/pick")
 def pick(x: int, y: int, frame: int | None = None):
+    """Object under (x, y) at `frame`: id, bbox and a tint mask (PNG, alpha)."""
     from .renderer import state_at
-    return {"id": state_at(STATE["project"], frame).pick(x, y)}
+    st = state_at(STATE["project"], frame)
+    om = st.owner_map()
+    oid = st.pick(x, y)
+    if oid is None:
+        return {"id": None}
+    m = om == st._idn[oid]
+    ys, xs = np.nonzero(m)
+    rgba = np.zeros((*m.shape, 4), np.uint8)
+    rgba[m] = (255, 64, 160, 140)
+    ok, png = cv2.imencode(".png", rgba[..., [2, 1, 0, 3]])
+    return {"id": oid, "bbox": [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())],
+            "area": int(m.sum()), "mask": base64.b64encode(png.tobytes()).decode()}
 
 
 @app.post("/api/edit/delete")
@@ -172,7 +201,7 @@ def delete_object(target: str, frame: int | None = None):
 
 
 @app.post("/api/edit/recolor")
-def recolor_object(target: str, color: list[int], frame: int | None = None):
+def recolor_object(target: str, color: list[int] = Body(embed=True), frame: int | None = None):
     _add_edit({"type": "RECOLOR", "target": target, "color": color}, frame)
     return {"ok": True}
 

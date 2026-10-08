@@ -111,6 +111,32 @@ Tested on Luffy / Naruto / Tanjiro (fetched locally into `testdata/`, git-ignore
 final PSNR 100 dB (pixel-exact), structure-only PSNR ~21 dB / SSIM ~0.8-0.86 --
 the structured stages carry the look, polish carries the last pixels.
 
+## See it draw
+
+Real output (images are the actual replay, not mock-ups). Each GIF goes outline -> colors -> shading -> details, no cuts:
+
+| Luffy | Tanjiro |
+|---|---|
+| ![Luffy drawing](docs/luffy_drawing.gif) | ![Tanjiro drawing](docs/tanjiro_drawing.gif) |
+
+## Editable at any frame
+
+The drawing is a timeline of objects, not a flat video. Edit at any step and the edit
+stays in every later step:
+
+![edit persistence](docs/edit_persistence.png)
+
+Left to right: before the edit, the moment after (a band erased, a red stroke painted),
+later in the drawing, and the final frame. The erased band is never repainted and the
+brush stroke stays on top. Tools in the web editor (`python -m img2draw.editor_server`,
+open http://127.0.0.1:8000): **Select** (click an object, delete or recolor it),
+**Brush**, **Eraser**, undo/redo, a timeline scrubber, play, and "Watch as video".
+
+How it works: every op has an `id` and a time `t`; edits are ops with fractional `t`.
+`renderer.State` replays the timeline, keeps a *protect mask* so later ops cannot
+paint over an erase or brush, and replays from scratch for delete/recolor. Final
+detail patches are per-object (`target`), so deleting an object also drops its detail.
+
 ## Limitations
 
 - Vector layer reconstruction is approximate for noisy/photographic content;
