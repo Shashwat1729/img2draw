@@ -15,7 +15,7 @@ for m in MODULES:
 html = (root / "frontend/index.html").read_text(encoding="utf-8")
 ver = hashlib.sha1(b"".join((root / f).read_bytes() for f in ["frontend/index.html", "frontend/static.js", "frontend/worker.js"] + [f"src/img2draw/{m}.py" for m in MODULES])).hexdigest()[:10]
 inject = ('<script>window.STATIC_MODE=true</script>\n'
-          '<script src="static.js"></script>\n')
+          f'<script src="static.js?v={ver}"></script>\n')
 html = html.replace("<script>\nconst $=", inject + "<script>\nconst $=", 1)
 (out / "index.html").write_text(html, encoding="utf-8")
 (out / "static.js").write_text((root / "frontend/static.js").read_text(encoding="utf-8").replace('"worker.js"', f'"worker.js?v={ver}"'), encoding="utf-8")
